@@ -1,0 +1,27 @@
+# robots.txt for https://www.thomasplayer.me/
+# Purpose: allow only homepage to be crawled, block all other pages & directories
+
+# Applies to all crawlers
+User-agent: *
+
+# Allow only the root homepage
+Allow: /
+
+# Disallow everything else
+Disallow: /*
+
+# Additional clarity (not strictly required but explicit)
+Disallow: /about
+Disallow: /contact
+Disallow: /blog/
+Disallow: /images/
+Disallow: /css/
+Disallow: /js/
+Disallow: /assets/
+
+# Prevent crawling of URL parameters
+Disallow: /*?*
+Disallow: /*&*
+
+# Sitemap location (optional, but useful for homepage indexing)
+# Sitemap: https://thomasplayer.me/sitemap.xml

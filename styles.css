@@ -5,7 +5,7 @@
   --bg: #ffffff;
   --fg: #111111;
   --muted: #6b6b6b;
-  --accent: #0066cc;
+  --accent: #B15ED1;
   --divider: rgba(0,0,0,0.08);
   --content-max: 900px;
 
@@ -26,7 +26,7 @@
 /* ---------- Reset / Base ---------- */
 html { box-sizing: border-box; font-size: var(--base-size); -webkit-text-size-adjust: 100%; }
 *, *::before, *::after { box-sizing: inherit; }
-html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font-family: "Times New Roman", Times, "Noto Serif", "Source Serif Pro", serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
 
 /* Improve text rendering and line-length on narrow viewports */
 body {

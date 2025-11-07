@@ -29,7 +29,7 @@ except Exception:
     # fallback to system local tz if zoneinfo unavailable
     LOCAL_TZ = datetime.now().astimezone().tzinfo
 
-    
+
 
 # ---------------- CONFIG ----------------
 # (feed_url, section)
@@ -303,13 +303,15 @@ def build_html_digest(items_by_section, err_message=None):
             pub = it.get("published")
             pub_txt = format_pub_local(pub) if pub else ""
             summ = short_summary_from_snippet(it.get("summary",""), max_chars=500) or (t + ".")
+            # build article: title, escaped summary, then source+date meta at bottom
             blocks.append(
-                f"<article class='news-item'>"
-                f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
-                f"<div class='meta'>{src} · {pub_txt}</div>"
+                "<article class='news-item'>"
+                f"<h3 class='news-title'><a href='{html.escape(link)}' target='_blank' rel='noopener'>{t}</a></h3>"
                 f"<p class='summary'>{html.escape(summ)}</p>"
-                f"</article>"
+                f"<div class='meta'>{html.escape(src)}|{html.escape(pub_txt)}</div>"
+                "</article>"
             )
+
         # include a section-body wrapper (CSS expects it)
         section_html = (
             f"<section class='section'>"

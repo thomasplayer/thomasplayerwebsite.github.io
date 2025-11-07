@@ -66,7 +66,7 @@ a:hover{color:var(--accent)}
 .divider{width:100%;border-top:2px dashed var(--divider);margin:var(--gap) 0}
 
 /* Digest-specific styles */
-.digest-header h1{margin:0 0 .25rem 0;font-size:1.75rem}
+.digest-header{margin:0 0 .25rem 0} h1{margin:0 0 .25rem 0;font-size:1.75rem}
 .digest-content .story{margin-bottom:1.25rem;padding-bottom:.5rem;border-bottom:1px solid rgba(0,0,0,0.04)}
 .story-title{margin:.25rem 0}
 .story-summary{margin:.5rem 0}

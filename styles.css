@@ -90,3 +90,24 @@ a:hover{color:var(--accent)}
   .sidebar{display:none}
   .container{max-width:100%}
 }
+
+/* ensure news items show summary then meta at the bottom */
+.news-item {
+  display: block;
+  margin-bottom: 1.25rem;
+  padding-bottom: .5rem;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+}
+
+.news-item .summary {
+  margin: .5rem 0;
+  color: var(--fg);
+  white-space: pre-wrap; /* preserves your short-summary line breaks */
+  line-height: 1.45;
+}
+
+.news-item .meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: .5rem;
+}

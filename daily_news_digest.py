@@ -29,6 +29,8 @@ except Exception:
     # fallback to system local tz if zoneinfo unavailable
     LOCAL_TZ = datetime.now().astimezone().tzinfo
 
+    
+
 # ---------------- CONFIG ----------------
 # (feed_url, section)
 RSS_FEEDS = [
@@ -368,7 +370,7 @@ def build_html_digest(items_by_section, err_message=None):
     </footer>
 
   </main>
-  <aside class="sidebar">...</aside>
+  <aside class="sidebar"></aside>
   </div>
 </body>
 </html>"""

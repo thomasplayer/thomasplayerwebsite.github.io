@@ -212,15 +212,32 @@ def build_html_digest(items_by_section, err_message=None):
 
     sections_block = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
 
-    # archives listing (latest 10)
+    # archives listing (latest 10) -- formatted link text from filename: HH:MM:SS DD Month YYYY (local Europe/London)
     archives_html = ""
     try:
         if os.path.isdir(ARCHIVE_DIR):
             files = [f for f in os.listdir(ARCHIVE_DIR) if f.startswith("digest-") and f.endswith(".html")]
             files.sort(reverse=True)
             if files:
-                links = "\n".join(f"<li><a href='{html.escape(os.path.join(ARCHIVE_DIR, f))}'>{html.escape(f)}</a></li>" for f in files[:10])
-                archives_html = f"<h4>Archive</h4><ul class='archive'>{links}</ul>"
+                links = []
+                for f in files[:10]:
+                    display_time = None
+                    try:
+                        # filename pattern: digest-YYYYMMDDHHMMSS.html
+                        ts_str = f.removeprefix("digest-").removesuffix(".html")
+                        dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+                        # convert to local timezone for display
+                        try:
+                            local_dt = dt.astimezone(LOCAL_TZ)
+                        except Exception:
+                            local_dt = dt.astimezone()
+                        display_time = local_dt.strftime("%H:%M:%S %d %B %Y")
+                    except Exception:
+                        display_time = None
+                    link_href = html.escape(os.path.join(ARCHIVE_DIR, f))
+                    link_text = html.escape(display_time if display_time else f)
+                    links.append(f"<li><a href='{link_href}'>{link_text}</a></li>")
+                archives_html = f"<h4>Archive</h4><ul class='archive'>{''.join(links)}</ul>"
     except Exception:
         archives_html = ""
 

@@ -338,36 +338,33 @@ def build_html_digest(items_by_section, err_message=None):
     page = f"""<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Daily News Digest</title>
-<style>
-:root {{ --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; --body-indent:12px; }}
-html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
-.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}}
-.header{{margin-bottom:12px;}}
-.header h1{{margin:0;font-size:26px;}}
-.header .time{{color:var(--muted);font-size:1rem;margin-top:6px}}
-.error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
-.section{{margin-top:18px}}
-.section-title{{margin:0 0 8px 0;font-size:1.25rem;}}
-.section .section-body{{padding-left:var(--body-indent);}}
-.news-item{{padding:10px 0;border-bottom:1px solid #eee;padding-left:var(--body-indent);}}
-.news-title{{margin:0;font-size:1.05rem}}
-.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}}
-.meta{{color:var(--muted);font-size:0.9rem;margin-top:6px;padding-left:0}}
-.summary{{margin-top:8px;color:#222;white-space:pre-wrap;padding-left:0}}
-.archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
-@media(max-width:800px){{ .container{{padding:18px;margin:18px}} }}
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Daily News Digest</title>
+
+  <!-- single stylesheet in site root -->
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="container">
-    <div class="header"><h1>Daily News</h1><div class="time">{html.escape(updated_label)}</div></div>
+    <header class="digest-header">
+      <h1>Daily News</h1>
+      <div class="muted time">{html.escape(updated_label)}</div>
+    </header>
+
     {error_block}
+
+    <!-- sections_block should output one or more .digest-section blocks -->
     {sections_block}
-    {archives_html}
-    <footer style="margin-top:18px;color:var(--muted);font-size:0.9rem">Generated automatically. Source list editable in <code>daily_news_digest.py</code>.</footer>
+
+    <!-- archives_html should be a simple list or block; keep it muted -->
+    <div class="archive muted">
+      {archives_html}
+    </div>
+
+    <footer class="muted" style="margin-top:18px;font-size:0.9rem">
+      Generated automatically. Source list editable in <code>daily_news_digest.py</code>.
+    </footer>
   </div>
 </body>
 </html>"""

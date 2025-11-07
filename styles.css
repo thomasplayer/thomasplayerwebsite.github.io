@@ -1,0 +1,163 @@
+/* styles.css — modernized, accessible, and minimal */
+
+/* ---------- Variables ---------- */
+:root{
+  --bg: #ffffff;
+  --fg: #111111;
+  --muted: #6b6b6b;
+  --accent: #0066cc;
+  --divider: rgba(0,0,0,0.08);
+  --content-max: 900px;
+
+  /* spacing scale (rem) */
+  --space-1: 0.5rem;   /* 8px */
+  --space-2: 1rem;     /* 16px */
+  --space-3: 1.5rem;   /* 24px */
+  --space-4: 2rem;     /* 32px */
+
+  /* type scale */
+  --base-size: 1rem;               /* 16px */
+  --h1-size: clamp(1.4rem, 1.15rem + 1.2vw, 1.9rem);
+  --h2-size: clamp(1.05rem, 0.95rem + 0.6vw, 1.15rem);
+  --lead-size: 1rem;
+  box-sizing: border-box;
+}
+
+/* ---------- Reset / Base ---------- */
+html { box-sizing: border-box; font-size: var(--base-size); -webkit-text-size-adjust: 100%; }
+*, *::before, *::after { box-sizing: inherit; }
+html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+
+/* Improve text rendering and line-length on narrow viewports */
+body {
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-3);
+}
+
+/* ---------- Accessibility helpers ---------- */
+/* Visible focus only when keyboard used */
+:focus { outline: none; }
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+
+/* Screen-reader helper (optional, kept small) */
+.sr-only {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Links and decorative caret ---------- */
+a {
+  color: var(--accent);
+  text-decoration: none;
+  position: relative;
+  word-break: break-word;
+}
+a::after {
+  content: '↗︎';
+  margin-left: 0.35rem;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: var(--accent);
+  /* make pseudo purely decorative */
+  pointer-events: none;
+  vertical-align: baseline;
+  opacity: 0.95;
+}
+a:hover, a:focus { text-decoration: underline; }
+
+/* In print, remove decorative caret */
+@media print {
+  a::after { content: ""; }
+}
+
+/* ---------- Headers ---------- */
+header,
+.digest-header { margin: 0 0 var(--space-3) 0; }
+header h1, .digest-header h1 {
+  margin: 0;
+  font-size: var(--h1-size);
+  line-height: 1.05;
+  font-weight: 700;
+}
+header .muted, .digest-header .muted {
+  color: var(--muted);
+  margin-top: calc(var(--space-1) / 2);
+  font-size: 0.95rem;
+}
+
+/* Basic nav (index.html) */
+nav { margin-top: var(--space-1); }
+nav a { display: inline-block; margin-right: 0.6rem; font-size: 0.98rem; }
+
+/* ---------- Digest: sections and news items ---------- */
+.section { margin: var(--space-2) 0 var(--space-3) 0; }
+.section-title {
+  margin: 0 0 var(--space-1) 0;
+  font-size: var(--h2-size);
+  font-weight: 700;
+  color: var(--fg);
+}
+.section-body { margin-top: 0.5rem; }
+
+.news-item {
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--divider);
+}
+.news-title {
+  margin: 0.25rem 0;
+  font-size: 1rem;
+  line-height: 1.15;
+  font-weight: 600;
+}
+.news-title a { color: var(--fg); text-decoration: none; }
+.news-title a:hover { color: var(--accent); text-decoration: underline; }
+
+.news-item .summary {
+  margin: 0.45rem 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  font-size: var(--lead-size);
+  color: var(--fg);
+}
+.news-item .meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+}
+
+/* Archive list */
+.archive { margin-top: 0.5rem; padding-left: 1rem; }
+.archive li { margin-bottom: 0.35rem; }
+
+/* Simple content elements used in index.html */
+h2 { margin-top: 0; font-size: var(--h2-size); }
+p { margin: 0.5rem 0 1rem 0; }
+
+/* ---------- Print improvements ---------- */
+@media print {
+  body { color: #000; background: #fff; }
+  .news-item { page-break-inside: avoid; }
+  /* remove interactive affordances that don't print well */
+  a:hover { text-decoration: none; }
+}
+
+/* ---------- Small device tweaks ---------- */
+@media (max-width: 640px) {
+  body { padding: 1rem; }
+  .news-item { padding-bottom: .5rem; }
+  .news-title { font-size: 0.98rem; }
+}

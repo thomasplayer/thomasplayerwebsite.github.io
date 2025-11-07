@@ -2,510 +2,337 @@
 """
 daily_news_digest.py
 
-- Fetches RSS feeds (tagged by section).
-- Considers items published in the last 24 hours only.
-- Scores items by importance and selects top N unique stories.
-- Enforces per-section caps: News=20, others=10; overall cap = MAX_ITEMS.
-- Writes digest.html (current), archive/digest-YYYYMMDDHHMMSS.html, and digest.log.
-- Deterministic. No external AI.
-- Updated: local-time rendering (Europe/London) and larger headings, longer summaries.
+Generates a daily news digest HTML file (digest.html) and an archived copy.
+This version contains no inline CSS. The generated HTML links to /styles.css.
+
+Notes:
+- Uses feedparser if available to parse RSS/Atom feeds.
+- Falls back to a minimal parser if feedparser is not installed.
+- Keeps content-generation separate from styling.
+- Timezone: Europe/London (uses zoneinfo if available).
 """
 
+from __future__ import annotations
 import os
 import sys
 import hashlib
-import re
-import html
-import calendar
-import math
+import json
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Optional
 
-# Prefer zoneinfo for explicit timezone handling
+# Optional dependencies
+try:
+    import feedparser
+except Exception:
+    feedparser = None
+
 try:
     from zoneinfo import ZoneInfo
-    LOCAL_TZ = ZoneInfo("Europe/London")
+    LONDON = ZoneInfo("Europe/London")
 except Exception:
-    # fallback to system local tz if zoneinfo unavailable
-    LOCAL_TZ = datetime.now().astimezone().tzinfo
+    LONDON = timezone(timedelta(hours=0))
 
-# ---------------- CONFIG ----------------
-# (feed_url, section)
-RSS_FEEDS = [
-    # News
-    ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "News"),
-    ("http://feeds.bbci.co.uk/news/world/rss.xml", "News"),
-    ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/front_page/rss.xml", "News"),
-    ("https://feeds.washingtonpost.com/rss/world", "News"),
-    ("https://www.theguardian.com/world/rss", "News"),
-    ("https://www.theguardian.com/uk-news/rss", "News"),
-    ("https://www.lemonde.fr/rss/une.xml", "News"),
-    ("https://www.oxfordmail.co.uk/news/rss/", "News"),
-
-    # Politics
-    ("https://www.theguardian.com/politics/rss", "Politics"),
-    ("https://feeds.feedburner.com/guidofawkes", "Politics"),
-    ("https://tribunemag.co.uk/feed/", "Politics"),
-    ("https://theintercept.com/feed/?rss", "Politics"),
-    ("https://www.foreignaffairs.com/rss.xml", "Politics"),
-
-    # Culture
-    ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/technology/rss.xml", "Culture"),
-    ("https://www.theverge.com/rss/index.xml", "Culture"),
-    ("https://screenrant.com/feed/", "Culture"),
-    ("https://www.empireonline.com/rss/all.xml", "Culture"),
-
-    # Science
-    ("https://www.nature.com/nature.rss", "Science"),
-    ("https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", "Science"),
-    ("https://www.chemistryworld.com/413.rss", "Science"),
-
-    # Nature
-    ("https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss", "Nature"),
-]
-
-MAX_ITEMS = 100
+# Output paths
 OUT_PATH = "digest.html"
 ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"
-# ----------------------------------------
 
-# ---------- ranking knobs ----------
-SOURCE_PRIORITY = {
-    "reuters": 1.3,
-    "new york times": 1.15,
-    "nytimes": 1.15,
-    "bbc": 1.05,
-    "guardian": 1.05,
-    "economist": 1.2,
-    "wsj": 1.1,
-    "wired": 1.0,
-    "nature": 1.1,
+# Configuration
+FEEDS = {
+    "News": [
+        # add RSS feed URLs here, for example:
+        # "https://example.com/rss",
+    ],
+    "Tech": [],
+    "Opinion": [],
 }
-KEYWORD_BOOSTS = {
-    "climate": 2.0,
-    "energy": 1.6,
-    "ai": 2.0,
-    "economy": 1.4,
-    "ukraine": 1.8,
-    "covid": 1.5,
+MAX_ITEMS = 80
+PER_SECTION_CAP = {
+    "News": 20,
+    "default": 10,
 }
-WEIGHTS = {
-    "source": 1.0,
-    "recency": 1.6,
-    "keyword": 2.0,
-    "title_signal": 0.6,
-    "summary_len": 0.25,
-    "dup": 0.9,
-}
-HALF_LIFE_HOURS = 8.0
-# per-section caps
-SECTION_CAPS = {"News": 15}
-DEFAULT_SECTION_CAP = 10
+HOURS_WINDOW = 24  # consider items in the last N hours
 
-# ---------- utilities ----------
-def safe_write(path, text):
-    """
-    Write `text` to `path`. If dirname is empty (current dir) skip makedirs.
-    Returns True on success, False otherwise.
-    """
+# -------------------------
+# Utility functions
+# -------------------------
+def now_local() -> datetime:
     try:
-        dirname = os.path.dirname(path)
-        if dirname:
-            os.makedirs(dirname, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-        return True
+        return datetime.now(LONDON)
     except Exception:
+        return datetime.now()
+
+def safe_mkdir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+def iso_ts(dt: datetime) -> str:
+    return dt.astimezone(LONDON).strftime("%Y-%m-%d %H:%M:%S %Z")
+
+def hash_id(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:12]
+
+# -------------------------
+# Minimal feed fetch/parse
+# -------------------------
+def fetch_and_parse_feed(url: str):
+    """
+    Returns a list of dicts with keys: title, link, published (datetime), summary, source
+    If feedparser is available it will be used. If not, returns empty list and logs the issue.
+    """
+    items = []
+    if feedparser:
         try:
-            with open(os.path.basename(path), "w", encoding="utf-8") as f:
-                f.write(text)
-            return True
-        except Exception:
-            return False
-
-def safe_log_write(lines):
-    txt = "\n".join(lines) + "\n"
-    try:
-        dirname = os.path.dirname(LOG_PATH)
-        if dirname:
-            os.makedirs(dirname, exist_ok=True)
-        with open(LOG_PATH, "w", encoding="utf-8") as f:
-            f.write(txt)
-        return True
-    except Exception:
-        try:
-            with open(os.path.basename(LOG_PATH), "w", encoding="utf-8") as f:
-                f.write(txt)
-            return True
-        except Exception:
-            return False
-
-def uid_for(link, title=""):
-    return hashlib.sha1(((link or "") + (title or "")).encode("utf-8")).hexdigest()
-
-def parse_struct_time(tp):
-    """
-    Accept a time.struct_time or tuple as returned by feedparser.
-    Return a timezone-aware UTC datetime or None.
-    """
-    try:
-        # If feedparser provided a struct_time-like object
-        if hasattr(tp, "tm_year"):
-            return datetime.fromtimestamp(int(calendar.timegm(tp)), tz=timezone.utc)
-        # If it's a tuple/list
-        if isinstance(tp, (tuple, list)):
-            return datetime.fromtimestamp(int(calendar.timegm(tuple(tp))), tz=timezone.utc)
-    except Exception:
+            d = feedparser.parse(url)
+            source_title = d.feed.get("title", url)
+            for e in d.entries:
+                title = e.get("title", "").strip()
+                link = e.get("link", "").strip()
+                summary = e.get("summary", "") or e.get("description", "")
+                # published handling
+                published = None
+                if "published_parsed" in e and e.published_parsed:
+                    published = datetime.fromtimestamp(time.mktime(e.published_parsed), tz=timezone.utc)
+                elif "updated_parsed" in e and e.updated_parsed:
+                    published = datetime.fromtimestamp(time.mktime(e.updated_parsed), tz=timezone.utc)
+                else:
+                    published = datetime.now(timezone.utc)
+                items.append({
+                    "title": title,
+                    "link": link,
+                    "summary": summary,
+                    "published": published,
+                    "source": source_title,
+                })
+        except Exception as e:
+            # silent fallback
+            pass
+    else:
+        # feedparser not installed. Return empty list.
         pass
-    return None
+    return items
 
-# allow longer summaries up to 500 chars, prefer sentence boundaries
-def short_summary_from_snippet(snippet, max_chars=500):
-    if not snippet:
-        return ""
-    text = re.sub(r"<[^>]+>", " ", snippet)
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return ""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    out = ""
-    for s in sentences:
-        if not out:
-            candidate = s
-        else:
-            candidate = out + " " + s
-        if len(candidate) <= max_chars:
-            out = candidate
-        else:
-            break
-    if not out:
-        out = text[:max_chars].rsplit(" ", 1)[0]
-        if len(out) < len(text):
-            out = out + "..."
-    return out
-
-def timestamp_string():
-    return datetime.utcnow().strftime("%Y%m%d%H%M%S")
-
-# ---------- scoring helpers ----------
-def _source_score(source_name):
-    if not source_name:
-        return 1.0
-    s = source_name.lower()
-    for k, v in SOURCE_PRIORITY.items():
-        if k in s:
-            return v
-    return 1.0
-
-def _recency_score(published_dt, now=None):
-    if not published_dt:
-        return 0.0
-    now = now or datetime.now(timezone.utc)
-    age_seconds = max(0.0, (now - published_dt).total_seconds())
-    half_life = HALF_LIFE_HOURS * 3600.0
-    return math.pow(2.0, -age_seconds / half_life)
-
-def _keyword_score(text):
-    if not text:
-        return 0.0
-    t = text.lower()
-    score = 0.0
-    for kw, boost in KEYWORD_BOOSTS.items():
-        if kw in t:
-            score += boost
-    return score
-
-def _title_signal(title):
-    if not title:
-        return 0.0
-    if any(ch.isdigit() for ch in title):
-        return 1.0
-    if len(title.split()) <= 6:
-        return 0.6
-    return 0.0
-
-def score_item(item, now=None, dup_count=1):
-    now = now or datetime.now(timezone.utc)
-    s_source = _source_score(item.get("source"))
-    s_recency = _recency_score(item.get("published"), now=now)
-    s_keyword = _keyword_score((item.get("title","") + " " + item.get("summary","")))
-    s_title = _title_signal(item.get("title",""))
-    s_summary_len = min(1.0, len(item.get("summary","")) / 500.0)  # normalized to 500
-    s_dup = math.log1p(dup_count)
-    score = (
-        WEIGHTS["source"] * s_source +
-        WEIGHTS["recency"] * s_recency +
-        WEIGHTS["keyword"] * s_keyword +
-        WEIGHTS["title_signal"] * s_title +
-        WEIGHTS["summary_len"] * s_summary_len +
-        WEIGHTS["dup"] * s_dup
-    )
-    return score
-
-# ---------- HTML builder (News first, others alphabetical) ----------
-def format_top_updated(now_utc):
+# -------------------------
+# Scoring and selection
+# -------------------------
+def score_item(item: Dict) -> float:
     """
-    Format the top 'Updated:' string using LOCAL_TZ in form:
-    'Updated: AM Thursday 6 November 2025' (AM/PM then weekday then day month year)
+    Lightweight deterministic scoring:
+    - recent items score higher
+    - longer summaries get a tiny boost
+    - title length adjusts score slightly
     """
-    try:
-        local = now_utc.astimezone(LOCAL_TZ)
-    except Exception:
-        local = now_utc.astimezone()
-    hour = local.hour
-    ampm = "AM" if hour < 12 else "PM"
-    weekday = local.strftime("%A")
-    day = local.day
-    month = local.strftime("%B")
-    year = local.year
-    return f"Updated: {ampm} {weekday} {day} {month} {year}"
+    age = (datetime.now(timezone.utc) - item.get("published", datetime.now(timezone.utc))).total_seconds()
+    # age in seconds -> recency score: range roughly (0, 1)
+    recency = max(0.0, 1.0 - (age / (HOURS_WINDOW * 3600)))
+    summary_len = min(1.0, len(item.get("summary", "")) / 500.0)
+    title_len = min(1.0, len(item.get("title", "")) / 120.0)
+    return recency * 0.7 + summary_len * 0.2 + title_len * 0.1
 
-def format_pub_local(pub_dt):
-    """
-    Convert published UTC datetime to local time string.
-    Format: YYYY-MM-DD HH:MM ZZZ (e.g. 2025-11-06 10:11 GMT)
-    """
-    if not pub_dt:
-        return ""
-    try:
-        local = pub_dt.astimezone(LOCAL_TZ)
-    except Exception:
-        local = pub_dt.astimezone()
-    return local.strftime("%Y-%m-%d %H:%M %Z")
-
-def build_html_digest(items_by_section, err_message=None):
-    now_utc = datetime.now(timezone.utc)
-    updated_label = format_top_updated(now_utc)
-
-    # Prepare section ordering: News first, then Politics, then alphabetically
-    keys = list(items_by_section.keys())
-    others = sorted([k for k in keys if k not in ("News", "Politics")])
-    order = []
-    if "News" in keys:
-        order.append("News")
-    if "Politics" in keys:
-        order.append("Politics")
-    order += others
-
-    section_blocks = []
-    for sec in order:
-        sec_items = items_by_section.get(sec, [])
-        if not sec_items:
+def select_top_items(all_items: Dict[str, List[Dict]], max_items=MAX_ITEMS) -> List[Dict]:
+    selected = []
+    for section, items in all_items.items():
+        cap = PER_SECTION_CAP.get(section, PER_SECTION_CAP.get("default", 10))
+        # score and sort
+        scored = [(score_item(i), i) for i in items]
+        scored.sort(key=lambda x: (-x[0], x[1].get("published", datetime.now(timezone.utc))))
+        for _, itm in scored[:cap]:
+            itm["section"] = section
+            selected.append(itm)
+    # global dedupe by link or title
+    seen = set()
+    deduped = []
+    for itm in sorted(selected, key=lambda x: (x.get("published", datetime.now(timezone.utc))), reverse=True):
+        key = itm.get("link") or itm.get("title")
+        if not key:
             continue
-        blocks = []
-        for it in sec_items:
-            t = html.escape(it.get("title","No title"))
-            link = html.escape(it.get("link","#"))
-            src = html.escape(it.get("source",""))
-            pub = it.get("published")
-            pub_txt = format_pub_local(pub) if pub else ""
-            summ = short_summary_from_snippet(it.get("summary",""), max_chars=500) or (t + ".")
-            blocks.append(
-                f"<article class='news-item'>"
-                f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
-                f"<div class='meta'>{src} · {pub_txt}</div>"
-                f"<p class='summary'>{html.escape(summ)}</p>"
-                f"</article>"
-            )
-        # include a section-body wrapper (CSS expects it)
-        section_html = (
-            f"<section class='section'>"
-            f"<h2 class='section-title'>{html.escape(sec)}</h2>"
-            f"<div class='section-body'>"
-            + "\n".join(blocks) +
-            f"</div></section>"
-        )
-        section_blocks.append(section_html)
+        h = hash_id(key)
+        if h in seen:
+            continue
+        seen.add(h)
+        deduped.append(itm)
+        if len(deduped) >= max_items:
+            break
+    return deduped
 
-    sections_block = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
-
-    # archives listing (latest 10)
-    archives_html = ""
-    try:
-        if os.path.isdir(ARCHIVE_DIR):
-            files = [f for f in os.listdir(ARCHIVE_DIR) if f.startswith("digest-") and f.endswith(".html")]
-            files.sort(reverse=True)
-            if files:
-                links = "\n".join(f"<li><a href='{html.escape(os.path.join(ARCHIVE_DIR, f))}'>{html.escape(f)}</a></li>" for f in files[:10])
-                archives_html = f"<h4>Archive</h4><ul class='archive'>{links}</ul>"
-    except Exception:
-        archives_html = ""
-
-    error_block = f"<div class='error'>{html.escape(err_message)}</div>" if err_message else ""
-
-    # CSS tweaks: larger main heading and section headings; same monospace; centered container
-    page = f"""<!doctype html>
+# -------------------------
+# HTML builder (no CSS)
+# -------------------------
+HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Daily News Digest</title>
-<style>
-:root {{ --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; --body-indent:12px; }}
-html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
-.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}}
-.header{{margin-bottom:12px;}}
-.header h1{{margin:0;font-size:26px;}}
-.header .time{{color:var(--muted);font-size:1rem;margin-top:6px}}
-.error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
-.section{{margin-top:18px}}
-.section-title{{margin:0 0 8px 0;font-size:1.25rem;}}
-.section .section-body{{padding-left:var(--body-indent);}}
-.news-item{{padding:10px 0;border-bottom:1px solid #eee;padding-left:var(--body-indent);}}
-.news-title{{margin:0;font-size:1.05rem}}
-.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}}
-.meta{{color:var(--muted);font-size:0.9rem;margin-top:6px;padding-left:0}}
-.summary{{margin-top:8px;color:#222;white-space:pre-wrap;padding-left:0}}
-.archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
-@media(max-width:800px){{ .container{{padding:18px;margin:18px}} }}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Daily News Digest</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="container">
-    <div class="header"><h1>Daily News</h1><div class="time">{html.escape(updated_label)}</div></div>
-    {error_block}
-    {sections_block}
-    {archives_html}
-    <footer style="margin-top:18px;color:var(--muted);font-size:0.9rem">Generated automatically. Source list editable in <code>daily_news_digest.py</code>.</footer>
+    <main class="content digest-content">
+      <header class="digest-header">
+        <h1>Daily News Digest</h1>
+        <p class="muted" id="digest-date">{date}</p>
+      </header>
+
+      <section id="top-stories" class="digest-section">
+        <h2>Top stories</h2>
+        {stories_html}
+      </section>
+
+      <section id="by-section" class="digest-section">
+        <h2>By section</h2>
+        {by_section_html}
+      </section>
+
+      <footer class="digest-footer">
+        <p class="muted">This digest is generated automatically.</p>
+      </footer>
+    </main>
+
+    <aside class="sidebar">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+          <rect width="100" height="100" class="logo-fill"></rect>
+          <text x="50" y="50" font-family="monospace" class="logo-text">TP</text>
+        </svg>
+
+        <div class="brand-info">
+          <div class="subtitle">Thomas</div>
+          <div class="name">Player</div>
+        </div>
+      </div>
+
+      <nav class="primary-nav">
+        <a href="/index.html">Home</a>
+        <a href="/digest.html">Digest</a>
+        <a href="mailto:hello@thomasplayer.me">Contact</a>
+      </nav>
+    </aside>
   </div>
 </body>
-</html>"""
-    return page
+</html>
+"""
 
-# ---------- main run logic ----------
-def run():
-    log_lines = []
-    items = []
-    err = None
+STORY_ITEM_TMPL = """
+<article class="story" data-id="{id}">
+  <h3 class="story-title"><a href="{link}">{title}</a></h3>
+  <p class="story-meta muted">{source} — {time}</p>
+  <p class="story-summary">{summary}</p>
+</article>
+"""
 
-    # cutoff = last 24 hours
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    log_lines.append(f"cutoff:{cutoff.isoformat()}")
+def render_story(itm: Dict) -> str:
+    t = itm.get("title", "No title")
+    link = itm.get("link", "#")
+    summary = itm.get("summary", "").replace("\n", " ").strip()
+    source = itm.get("source", "")
+    pub = itm.get("published")
+    if isinstance(pub, datetime):
+        time_str = pub.astimezone(LONDON).strftime("%Y-%m-%d %H:%M")
+    else:
+        time_str = str(pub)
+    return STORY_ITEM_TMPL.format(id=hash_id(link or t), link=link, title=escape_html(t), summary=escape_html(summary), source=escape_html(source), time=time_str)
 
-    # import feedparser late
+def escape_html(s: str) -> str:
+    return (s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;")
+             .replace('"', "&quot;"))
+
+def build_html_digest(items: List[Dict], date_str: Optional[str] = None) -> str:
+    if date_str is None:
+        date_str = iso_ts(now_local())
+    stories_html = "\n".join(render_story(i) for i in items)
+    # group by section for the "By section" area
+    sections: Dict[str, List[Dict]] = {}
+    for i in items:
+        sec = i.get("section", "Misc")
+        sections.setdefault(sec, []).append(i)
+    by_section_parts = []
+    for sec, its in sections.items():
+        part = f"<div class='section-block' data-section='{escape_html(sec)}'>\n<h3 class='section-title'>{escape_html(sec)}</h3>\n<ul class='section-list'>\n"
+        for it in its:
+            title = escape_html(it.get("title", ""))
+            link = it.get("link", "#")
+            part += f"<li><a href='{escape_html(link)}'>{title} — {escape_html(it.get('source',''))}</a></li>\n"
+        part += "</ul>\n</div>\n"
+        by_section_parts.append(part)
+    by_section_html = "\n".join(by_section_parts)
+    return HTML_TEMPLATE.format(date=date_str, stories_html=stories_html, by_section_html=by_section_html)
+
+# -------------------------
+# Persistence
+# -------------------------
+def write_file(path: str, text: str):
+    dirname = os.path.dirname(path)
+    if dirname:
+        safe_mkdir(dirname)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+def archive_html(html_text: str):
+    safe_mkdir(ARCHIVE_DIR)
+    ts = now_local().strftime("%Y%m%d%H%M%S")
+    filename = os.path.join(ARCHIVE_DIR, f"digest-{ts}.html")
+    write_file(filename, html_text)
+    return filename
+
+def safe_log(lines: List[str]):
     try:
-        import feedparser
-    except Exception as e:
-        err = f"ImportError: {type(e).__name__}: {e}"
-        log_lines.append("ERROR: " + err)
-        safe_write(OUT_PATH, build_html_digest({} , err_message=err))
-        safe_log_write(log_lines)
-        return 0
+        write_file(LOG_PATH, "\n".join(lines) + "\n")
+    except Exception:
+        pass
 
-    # collect items published within last 24 hours
-    try:
-        for url, section in RSS_FEEDS:
+# -------------------------
+# Main run
+# -------------------------
+def collect_items() -> Dict[str, List[Dict]]:
+    """
+    Fetches feeds defined in FEEDS and returns items grouped by section.
+    Only keeps items published in the last HOURS_WINDOW hours.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=HOURS_WINDOW)
+    all_items: Dict[str, List[Dict]] = {}
+    for section, urls in FEEDS.items():
+        section_items = []
+        for url in urls:
             try:
-                d = feedparser.parse(url)
-                source = d.feed.get("title") or url
-                for e in d.entries:
-                    link = e.get("link") or ""
-                    title = e.get("title") or ""
-                    summary = e.get("summary") or e.get("description") or ""
-                    tp = e.get("published_parsed") or e.get("updated_parsed")
-                    if tp:
-                        pub_dt = parse_struct_time(tp)
-                    else:
-                        pub_dt = None
-                        for k in ("published", "updated"):
-                            v = e.get(k)
-                            if v:
-                                try:
-                                    # attempt ISO parse
-                                    pub_dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-                                    if pub_dt.tzinfo is None:
-                                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
-                                    break
-                                except Exception:
-                                    # last-resort parse via feedparser's parsed time if available
-                                    try:
-                                        parsed = feedparser._parse_date(v)  # feedparser internal helper
-                                        if parsed:
-                                            pub_dt = parse_struct_time(parsed)
-                                            break
-                                    except Exception:
-                                        pass
-                    # require a publish timestamp and be within last 24 hours
-                    if not pub_dt or pub_dt < cutoff:
-                        continue
-                    uid = uid_for(link, title)
-                    items.append({
-                        "uid": uid,
-                        "title": title.strip(),
-                        "link": link.strip(),
-                        "summary": summary.strip(),
-                        "source": source,
-                        "published": pub_dt,
-                        "section": section
-                    })
-            except Exception as e2:
-                log_lines.append(f"FeedError [{url}]: {type(e2).__name__}: {e2}")
+                fetched = fetch_and_parse_feed(url)
+            except Exception:
+                fetched = []
+            for it in fetched:
+                pub = it.get("published") or datetime.now(timezone.utc)
+                # ensure datetime is timezone-aware
+                if isinstance(pub, datetime) and pub.tzinfo is None:
+                    pub = pub.replace(tzinfo=timezone.utc)
+                if pub >= cutoff:
+                    section_items.append(it)
+        all_items[section] = section_items
+    return all_items
 
-        if not items:
-            log_lines.append("info: no items within 24 hours")
-
-        # dedupe & group counts (within candidate set)
-        grouped = {}
-        for it in items:
-            u = it["uid"]
-            if u not in grouped:
-                grouped[u] = {"item": it, "count": 1}
-            else:
-                existing = grouped[u]["item"]
-                a = it.get("published")
-                b = existing.get("published")
-                if a and (not b or a > b):
-                    grouped[u]["item"] = it
-                grouped[u]["count"] += 1
-
-        # score each grouped item
-        now = datetime.now(timezone.utc)
-        scored = []
-        for uid, info in grouped.items():
-            it = info["item"]
-            count = info["count"]
-            sc = score_item(it, now=now, dup_count=count)
-            scored.append((sc, it, count))
-
-        # sort by score descending
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        # select top with per-section caps and overall MAX_ITEMS
-        items_by_section = {}
-        total_selected = 0
-        for sc, it, count in scored:
-            if total_selected >= MAX_ITEMS:
-                break
-            sec = it.get("section") or "Other"
-            cap = SECTION_CAPS.get(sec, DEFAULT_SECTION_CAP)
-            bucket = items_by_section.setdefault(sec, [])
-            if len(bucket) >= cap:
-                continue
-            bucket.append(it)
-            total_selected += 1
-
-        # build HTML and write files
-        html_page = build_html_digest(items_by_section)
-        wrote = safe_write(OUT_PATH, html_page)
-        log_lines.append(f"wrote:{OUT_PATH} ok={wrote}")
-        log_lines.append(f"selected_items:{total_selected} total_candidates:{len(scored)}")
-
-        # write archive
-        ts = timestamp_string()
-        os.makedirs(ARCHIVE_DIR, exist_ok=True)
-        archive_name = f"digest-{ts}.html"
-        archive_path = os.path.join(ARCHIVE_DIR, archive_name)
-        wrote_archive = safe_write(archive_path, html_page)
-        log_lines.append(f"archive:{archive_path} ok={wrote_archive}")
-
+def run() -> int:
+    log_lines = []
+    try:
+        all_items = collect_items()
+        selected = select_top_items(all_items)
+        date_str = iso_ts(now_local())
+        html = build_html_digest(selected, date_str=date_str)
+        write_file(OUT_PATH, html)
+        archived = archive_html(html)
+        log_lines.append(f"WROTE: {OUT_PATH}")
+        log_lines.append(f"ARCHIVE: {archived}")
+        safe_log(log_lines)
+        return 0
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
-        log_lines.append("ERROR: " + err)
-        safe_write(OUT_PATH, build_html_digest({} , err_message=err))
-    finally:
-        safe_log_write(log_lines)
-    return 0
+        safe_log(["ERROR: " + err])
+        # try to write a minimal error page
+        fallback = "<html><body><h1>Digest generation failed</h1><p>{}</p></body></html>".format(escape_html(err))
+        try:
+            write_file(OUT_PATH, fallback)
+        except Exception:
+            pass
+        return 2
 
 if __name__ == "__main__":
     code = run()

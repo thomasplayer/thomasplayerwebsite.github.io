@@ -80,12 +80,12 @@ SOURCE_PRIORITY = {
 #    "nature": 1.1,
 }
 KEYWORD_BOOSTS = {
-    "star wars": 2.0,
-    "simpsons": 2.0,
-    "oxford": 2.0,
-    "knitting": 2.0,
-    "bird": 2.0,
-    "gluten": 2.0,
+    "star wars": 1.5,
+    "the simpsons": 1.5,
+#    "oxford": 2.0,
+#    "knitting": 2.0,
+#    "bird": 2.0,
+    "gluten": 1.5,
 #    "climate": 2.0,
 #    "energy": 1.6,
 #    "ai": 2.0,

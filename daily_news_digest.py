@@ -18,6 +18,7 @@ import re
 import html
 import calendar
 import math
+import time
 from datetime import datetime, timezone, timedelta
 
 # Prefer zoneinfo for explicit timezone handling
@@ -61,7 +62,6 @@ RSS_FEEDS = [
 
     # Nature
     ("https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss", "Nature"),
-
 ]
 
 MAX_ITEMS = 100
@@ -105,8 +105,14 @@ DEFAULT_SECTION_CAP = 10
 
 # ---------- utilities ----------
 def safe_write(path, text):
+    """
+    Write `text` to `path`. If dirname is empty (current dir) skip makedirs.
+    Returns True on success, False otherwise.
+    """
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        dirname = os.path.dirname(path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         return True
@@ -121,6 +127,9 @@ def safe_write(path, text):
 def safe_log_write(lines):
     txt = "\n".join(lines) + "\n"
     try:
+        dirname = os.path.dirname(LOG_PATH)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         with open(LOG_PATH, "w", encoding="utf-8") as f:
             f.write(txt)
         return True
@@ -136,10 +145,20 @@ def uid_for(link, title=""):
     return hashlib.sha1(((link or "") + (title or "")).encode("utf-8")).hexdigest()
 
 def parse_struct_time(tp):
+    """
+    Accept a time.struct_time or tuple as returned by feedparser.
+    Return a timezone-aware UTC datetime or None.
+    """
     try:
-        return datetime.fromtimestamp(int(calendar.timegm(tp)), tz=timezone.utc)
+        # If feedparser provided a struct_time-like object
+        if hasattr(tp, "tm_year"):
+            return datetime.fromtimestamp(int(calendar.timegm(tp)), tz=timezone.utc)
+        # If it's a tuple/list
+        if isinstance(tp, (tuple, list)):
+            return datetime.fromtimestamp(int(calendar.timegm(tuple(tp))), tz=timezone.utc)
     except Exception:
-        return None
+        pass
+    return None
 
 # allow longer summaries up to 500 chars, prefer sentence boundaries
 def short_summary_from_snippet(snippet, max_chars=500):
@@ -150,7 +169,6 @@ def short_summary_from_snippet(snippet, max_chars=500):
     if not text:
         return ""
     sentences = re.split(r'(?<=[.!?])\s+', text)
-    # join sentences until close to max_chars
     out = ""
     for s in sentences:
         if not out:
@@ -162,7 +180,6 @@ def short_summary_from_snippet(snippet, max_chars=500):
         else:
             break
     if not out:
-        # fallback to truncation at max_chars
         out = text[:max_chars].rsplit(" ", 1)[0]
         if len(out) < len(text):
             out = out + "..."
@@ -238,10 +255,10 @@ def format_top_updated(now_utc):
         local = now_utc.astimezone()
     hour = local.hour
     ampm = "AM" if hour < 12 else "PM"
-    weekday = local.strftime("%A")            # Thursday
-    day = local.day                           # 6
-    month = local.strftime("%B")              # November
-    year = local.year                         # 2025
+    weekday = local.strftime("%A")
+    day = local.day
+    month = local.strftime("%B")
+    year = local.year
     return f"Updated: {ampm} {weekday} {day} {month} {year}"
 
 def format_pub_local(pub_dt):
@@ -255,7 +272,6 @@ def format_pub_local(pub_dt):
         local = pub_dt.astimezone(LOCAL_TZ)
     except Exception:
         local = pub_dt.astimezone()
-    # include timezone abbreviation if available
     return local.strftime("%Y-%m-%d %H:%M %Z")
 
 def build_html_digest(items_by_section, err_message=None):
@@ -286,11 +302,21 @@ def build_html_digest(items_by_section, err_message=None):
             pub_txt = format_pub_local(pub) if pub else ""
             summ = short_summary_from_snippet(it.get("summary",""), max_chars=500) or (t + ".")
             blocks.append(
-                f"<article class='news-item'><h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
+                f"<article class='news-item'>"
+                f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
                 f"<div class='meta'>{src} · {pub_txt}</div>"
-                f"<p class='summary'>{html.escape(summ)}</p></article>"
+                f"<p class='summary'>{html.escape(summ)}</p>"
+                f"</article>"
             )
-        section_blocks.append(f"<section class='section'><h2 class='section-title'>{html.escape(sec)}</h2>" + "\n".join(blocks) + "</section>")
+        # include a section-body wrapper (CSS expects it)
+        section_html = (
+            f"<section class='section'>"
+            f"<h2 class='section-title'>{html.escape(sec)}</h2>"
+            f"<div class='section-body'>"
+            + "\n".join(blocks) +
+            f"</div></section>"
+        )
+        section_blocks.append(section_html)
 
     sections_block = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
 
@@ -316,25 +342,24 @@ def build_html_digest(items_by_section, err_message=None):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Daily News Digest</title>
 <style>
-:root { --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; --body-indent:12px; }
-html,body{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}
-.container{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}
-.header{margin-bottom:12px;}
-.header h1{margin:0;font-size:26px; /* header flush left inside container */ }
-.header .time{color:var(--muted);font-size:1rem;margin-top:6px}
-.error{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}
-.section{margin-top:18px}
-.section-title{margin:0 0 8px 0;font-size:1.25rem;} /* flush left */
-.section .section-body{padding-left:var(--body-indent);} /* indent all section body content */
-.news-item{padding:10px 0;border-bottom:1px solid #eee; padding-left:var(--body-indent);}
-.news-title{margin:0;font-size:1.05rem}
-.news-title a{color:var(--fg);text-decoration:underline;text-underline-offset:2px}
-.meta{color:var(--muted);font-size:0.9rem;margin-top:6px;padding-left:0}
-.summary{margin-top:8px;color:#222;white-space:pre-wrap;padding-left:0}
-.archive{margin-top:14px;padding-left:1rem;color:var(--muted)}
-@media(max-width:800px){ .container{padding:18px;margin:18px} }
+:root {{ --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; --body-indent:12px; }}
+html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
+.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}}
+.header{{margin-bottom:12px;}}
+.header h1{{margin:0;font-size:26px;}}
+.header .time{{color:var(--muted);font-size:1rem;margin-top:6px}}
+.error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
+.section{{margin-top:18px}}
+.section-title{{margin:0 0 8px 0;font-size:1.25rem;}}
+.section .section-body{{padding-left:var(--body-indent);}}
+.news-item{{padding:10px 0;border-bottom:1px solid #eee;padding-left:var(--body-indent);}}
+.news-title{{margin:0;font-size:1.05rem}}
+.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}}
+.meta{{color:var(--muted);font-size:0.9rem;margin-top:6px;padding-left:0}}
+.summary{{margin-top:8px;color:#222;white-space:pre-wrap;padding-left:0}}
+.archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
+@media(max-width:800px){{ .container{{padding:18px;margin:18px}} }}
 </style>
-
 </head>
 <body>
   <div class="container">
@@ -387,10 +412,20 @@ def run():
                             v = e.get(k)
                             if v:
                                 try:
+                                    # attempt ISO parse
                                     pub_dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                                    if pub_dt.tzinfo is None:
+                                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
                                     break
                                 except Exception:
-                                    pass
+                                    # last-resort parse via feedparser's parsed time if available
+                                    try:
+                                        parsed = feedparser._parse_date(v)  # feedparser internal helper
+                                        if parsed:
+                                            pub_dt = parse_struct_time(parsed)
+                                            break
+                                    except Exception:
+                                        pass
                     # require a publish timestamp and be within last 24 hours
                     if not pub_dt or pub_dt < cutoff:
                         continue

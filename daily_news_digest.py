@@ -10,6 +10,7 @@ daily_news_digest.py
 """
 
 from datetime import datetime, timezone
+from feedparser.util import mktime_tz  
 import os
 import hashlib
 import re
@@ -38,7 +39,7 @@ def parse_published(entry):
     tp = entry.get("published_parsed") or entry.get("updated_parsed")
     if tp:
         return datetime.fromtimestamp(
-            int(feedparser.mktime_tz(tp)), tz=timezone.utc
+            int(mktime_tz(tp)), tz=timezone.utc
         )
     # fallback: try ISO-style fields
     for k in ("published", "updated"):

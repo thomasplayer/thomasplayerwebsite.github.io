@@ -347,6 +347,7 @@ def build_html_digest(items_by_section, err_message=None):
 </head>
 <body>
   <div class="container">
+  <main class="content">
     <header class="digest-header">
       <h1>Daily News</h1>
       <div class="muted time">{html.escape(updated_label)}</div>
@@ -365,9 +366,15 @@ def build_html_digest(items_by_section, err_message=None):
     <footer class="muted" style="margin-top:18px;font-size:0.9rem">
       Generated automatically. Source list editable in <code>daily_news_digest.py</code>.
     </footer>
+
+  </main>
+  <aside class="sidebar">...</aside>
   </div>
 </body>
 </html>"""
+
+
+
     return page
 
 # ---------- main run logic ----------

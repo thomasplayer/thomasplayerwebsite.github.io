@@ -1,53 +1,31 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Thomas Player</title>
-
-  <!-- Link to single site stylesheet in web root -->
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <div class="container">
-    <main class="content">
-      <section id="home">
-        <h1>Thomas Player</h1>
-        <p class="muted">Science writer &amp; tutor — Oxford</p>
-      </section>
+  <header>
+    <h1>Thomas Player</h1>
+    <p class="muted">Science writer &amp; tutor — Oxford</p>
+    <nav>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
 
-      <section id="about">
-        <h2>About</h2>
-        <p>Hi — I'm Thomas, a science writer and tutor based in Oxford.</p>
-      </section>
+  <main>
+    <section id="about">
+      <h2>About</h2>
+      <p>Hi — I'm Thomas, a science writer and tutor based in Oxford.</p>
+    </section>
 
-      <div class="divider" role="separator" aria-hidden="true"></div>
-
-      <section id="contact">
-        <h2>Contact</h2>
-        <p>Email: <a href="mailto:hello@thomasplayer.me">hello@thomasplayer.me</a></p>
-      </section>
-    </main>
-
-    <aside class="sidebar" aria-label="Site sidebar">
-      <div class="brand">
-        <svg class="logo" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-          <rect width="100" height="100" class="logo-fill"></rect>
-          <text x="50" y="50" font-family="monospace" class="logo-text">TP</text>
-        </svg>
-
-        <div class="brand-info">
-          <div class="subtitle">Thomas</div>
-          <div class="name">Player</div>
-        </div>
-      </div>
-
-      <nav class="primary-nav" aria-label="Primary">
-        <a href="#home">Home</a>
-        <a href="#about">About</a>
-        <a href="mailto:hello@thomasplayer.me">Contact</a>
-      </nav>
-    </aside>
-  </div>
+    <section id="contact">
+      <h2>Contact</h2>
+      <p><a href="mailto:hello@thomasplayer.me">hello@thomasplayer.me</a></p>
+    </section>
+  </main>
 </body>
 </html>

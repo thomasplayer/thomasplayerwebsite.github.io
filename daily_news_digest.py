@@ -5,7 +5,7 @@ daily_news_digest.py
 - Fetches RSS feeds.
 - Dedupes, ranks by published date.
 - Produces deterministic short summaries.
-- Writes docs/digest.html (current) and docs/archive/digest-YYYYMMDDHHMMSS.html (archive).
+- Writes digest.html (current) and archive/digest-YYYYMMDDHHMMSS.html (archive).
 - Writes digest.log for CI artifact debugging.
 - Uses calendar.timegm() for struct_time -> epoch conversion.
 - Exits 0 so CI can upload artifacts even on failure.
@@ -22,25 +22,25 @@ from datetime import datetime, timezone
 # ---------------- CONFIG ----------------
 RSS_FEEDS = [
     # --- General / High-Quality News (Centrist / Mainstream) ---
-    "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",     
-    "http://feeds.reuters.com/reuters/topNews",                      
-    "https://www.theguardian.com/world/rss",                         
-    "http://feeds.bbci.co.uk/news/world/rss.xml",                    
-    "https://www.aljazeera.com/xml/rss/all.xml",                     
-    "https://www.economist.com/sections/international/rss.xml",      
+    "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+    "http://feeds.reuters.com/reuters/topNews",
+    "https://www.theguardian.com/world/rss",
+    "http://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://www.economist.com/sections/international/rss.xml",
 
     # --- Political Spectrum Additions ---
-    "https://www.wsj.com/xml/rss/3_7085.xml",                        
-    "https://www.theatlantic.com/feed/all/",                         
-    "https://www.nationalreview.com/feed/",                          
-    "https://www.americanprogress.org/feed/",                       
-    "https://reason.com/feed/",                                      
-    "https://www.politico.com/rss/politics08.xml",                   
-    "https://www.foreignaffairs.com/rss.xml",                        
-    "https://theintercept.com/feed/?rss",                            
-    "https://www.foxnews.com/about/rss/",                           
-    "https://www.npr.org/rss/rss.php?id=1001",                       
-    "https://www.project-syndicate.org/feeds/latest",                
+    "https://www.wsj.com/xml/rss/3_7085.xml",
+    "https://www.theatlantic.com/feed/all/",
+    "https://www.nationalreview.com/feed/",
+    "https://www.americanprogress.org/feed/",
+    "https://reason.com/feed/",
+    "https://www.politico.com/rss/politics08.xml",
+    "https://www.foreignaffairs.com/rss.xml",
+    "https://theintercept.com/feed/?rss",
+    "https://www.foxnews.com/about/rss/",
+    "https://www.npr.org/rss/rss.php?id=1001",
+    "https://www.project-syndicate.org/feeds/latest",
 
     # --- Science ---
     "https://www.nature.com/subjects/science.rss",
@@ -125,36 +125,100 @@ def short_summary_from_snippet(snippet):
         short = short[:237].rsplit(" ", 1)[0] + "..."
     return short
 
+# ---------------- Presentation: simple centered layout ----------------
 def build_html_digest(items, err_message=None):
-    now = datetime.now(timezone.utc).astimezone().isoformat()
-    header = (
-        f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>Daily News Digest</title></head><body>"
-        f"<h1>Daily News Digest</h1><div>Last updated: {html.escape(now)}</div>"
-    )
-    if err_message:
-        header += (
-            "<div style='color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0'>"
-            f"{html.escape(err_message)}</div>"
-        )
-    rows = []
-    for it in items:
+    """
+    Builds a simple centered page.
+    Includes latest articles and a short list of recent archive filenames (if any).
+    """
+    now_iso = datetime.now(timezone.utc).astimezone().isoformat()
+    # build articles
+    articles = []
+    for i, it in enumerate(items[:MAX_ITEMS], start=1):
         t = html.escape(it.get("title", "No title"))
         link = html.escape(it.get("link", "#"))
         src = html.escape(it.get("source", ""))
         pub = it.get("published")
         pub_txt = pub.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if pub else ""
         summ = short_summary_from_snippet(it.get("summary", "")) or (t + ".")
-        rows.append(
-            f"<div style='padding:12px 0;border-bottom:1px solid #eee'>"
-            f"<div style='font-weight:600'><a href='{link}' target='_blank' rel='noopener'>{t}</a></div>"
-            f"<div style='color:#777;font-size:.9rem'>{src} · {pub_txt}</div>"
-            f"<div style='margin-top:6px'>{html.escape(summ)}</div></div>"
+        article_html = (
+            f"<article class='news-item' id='item-{i}'>"
+            f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
+            f"<div class='meta'>{src} · {pub_txt}</div>"
+            f"<p class='summary'>{html.escape(summ)}</p>"
+            f"</article>"
         )
-    footer = "<div style='color:#666;margin-top:1rem'>Generated automatically.</div></body></html>"
-    return header + "\n".join(rows) + footer
+        articles.append(article_html)
+    articles_html = "\n".join(articles) if articles else "<p>No items found.</p>"
 
+    # build archives list (latest 10)
+    archives_html = ""
+    try:
+        if os.path.isdir(ARCHIVE_DIR):
+            files = [f for f in os.listdir(ARCHIVE_DIR) if f.startswith("digest-") and f.endswith(".html")]
+            files.sort(reverse=True)
+            if files:
+                links = "\n".join(f"<li><a href='{html.escape(os.path.join(ARCHIVE_DIR, f))}'>{html.escape(f)}</a></li>" for f in files[:10])
+                archives_html = f"<h4>Archive</h4><ul class='archive'>{links}</ul>"
+    except Exception:
+        archives_html = ""
+
+    error_block = f"<div class='error'>{html.escape(err_message)}</div>" if err_message else ""
+
+    # minimal CSS matching your monospace, centered, max-width styling
+    page = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Daily News Digest</title>
+<style>
+:root {{
+  --fg:#111;
+  --muted:#666;
+  --maxw:1000px;
+  --pad:28px;
+}}
+html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
+.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}}
+.header{{margin-bottom:12px;}}
+.header h1{{margin:0;font-size:20px}}
+.header .time{{color:var(--muted);font-size:0.95rem;margin-top:6px}}
+.error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
+.news-item{{padding:12px 0;border-bottom:1px solid #eee}}
+.news-title{{margin:0;font-size:1.05rem}}
+.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}}
+.meta{{color:var(--muted);font-size:0.9rem;margin-top:6px}}
+.summary{{margin-top:8px;color:#222}}
+.archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
+@media(max-width:800px){{
+  .container{{padding:18px;margin:18px}}
+}}
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Daily News</h1>
+      <div class="time">Last updated: {html.escape(now_iso)}</div>
+    </div>
+
+    {error_block}
+    <main class="news-list">
+      {articles_html}
+    </main>
+
+    {archives_html}
+
+    <footer style="margin-top:18px;color:var(--muted);font-size:0.9rem">
+      Generated automatically. Source list editable in <code>daily_news_digest.py</code>.
+    </footer>
+  </div>
+</body>
+</html>"""
+    return page
+
+# ---------------- Utility / IO ----------------
 def safe_log_write(lines):
     txt = "\n".join(lines) + "\n"
     try:

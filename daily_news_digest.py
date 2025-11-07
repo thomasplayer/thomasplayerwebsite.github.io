@@ -21,11 +21,62 @@ from datetime import datetime, timezone
 
 # ---------------- CONFIG ----------------
 RSS_FEEDS = [
-    "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-    "http://feeds.reuters.com/reuters/topNews",
-    "https://www.theguardian.com/world/rss"
+    # --- General / High-Quality News (Centrist / Mainstream) ---
+    "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",     
+    "http://feeds.reuters.com/reuters/topNews",                      
+    "https://www.theguardian.com/world/rss",                         
+    "http://feeds.bbci.co.uk/news/world/rss.xml",                    
+    "https://www.aljazeera.com/xml/rss/all.xml",                     
+    "https://www.economist.com/sections/international/rss.xml",      
+
+    # --- Political Spectrum Additions ---
+    "https://www.wsj.com/xml/rss/3_7085.xml",                        
+    "https://www.theatlantic.com/feed/all/",                         
+    "https://www.nationalreview.com/feed/",                          
+    "https://www.americanprogress.org/feed/",                       
+    "https://reason.com/feed/",                                      
+    "https://www.politico.com/rss/politics08.xml",                   
+    "https://www.foreignaffairs.com/rss.xml",                        
+    "https://theintercept.com/feed/?rss",                            
+    "https://www.foxnews.com/about/rss/",                           
+    "https://www.npr.org/rss/rss.php?id=1001",                       
+    "https://www.project-syndicate.org/feeds/latest",                
+
+    # --- Science ---
+    "https://www.nature.com/subjects/science.rss",
+    "https://www.scientificamerican.com/feed/rss/",
+
+    # --- Technology ---
+    "https://www.wired.com/feed/rss",
+
+    # --- Arts & Culture ---
+    "https://www.nytimes.com/svc/collections/v1/publish/arts/rss.xml",
+    "https://www.theguardian.com/artanddesign/rss",
+    "https://hyperallergic.com/feed/",
+
+    # --- Literature ---
+    "https://lithub.com/feed/",
+    "https://www.theparisreview.org/blog/feed/",
+    "https://www.poetryfoundation.org/rss/articles.xml",
+    "https://electricliterature.com/feed/",
+
+    # --- Birdwatching / Nature ---
+    "https://ebird.org/news/feed/",
+    "https://www.birdguides.com/feed/news/",
+    "https://www.audubon.org/rss.xml",
+
+    # --- Knitting & Craft ---
+    "https://blog.tincanknits.com/feed/",
+    "https://www.interweave.com/feed/",
+
+    # --- Movies & Film ---
+    "https://www.nytimes.com/svc/collections/v1/publish/entertainment/movies/rss.xml",
+    "https://www.empireonline.com/rss/all.xml",
+    "https://www.indiewire.com/feed/",
+    "https://screenrant.com/feed/"
 ]
-MAX_ITEMS = 10
+
+MAX_ITEMS = 50
 OUT_PATH = "digest.html"
 ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"

@@ -26,8 +26,8 @@ RSS_FEEDS = [
     "https://www.theguardian.com/world/rss"
 ]
 MAX_ITEMS = 10
-OUT_PATH = "docs/digest.html"
-ARCHIVE_DIR = "docs/archive"
+OUT_PATH = "digest.html"
+ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"
 # ----------------------------------------
 

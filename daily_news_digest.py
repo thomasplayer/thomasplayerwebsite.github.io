@@ -250,7 +250,7 @@ def build_html_digest(items_by_section, err_message=None):
     </div>
 
     <footer class="muted" style="margin-top:18px;font-size:0.9rem">
-      Generated automatically. Source list editable in <code>daily_news_digest.py</code>.
+      Generated automatically.
     </footer>
   </main>
 </body>

@@ -316,23 +316,25 @@ def build_html_digest(items_by_section, err_message=None):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Daily News Digest</title>
 <style>
-:root {{ --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; }}
-html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
-.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;padding-left:calc(var(--pad) + 12px);}}
-.header{{margin-bottom:12px;}} 
-.header h1{{margin:0;font-size:26px;margin-left:-12px}}
-.header .time{{color:var(--muted);font-size:1rem;margin-top:6px}} /* same font, clearer */
-.error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
-.section{{margin-top:18px}} 
-.section-title{{margin:0 0 8px 0;font-size:1.25rem;margin-left:-12px}}
-.news-item{{padding:10px 0;border-bottom:1px solid #eee}} 
-.news-title{{margin:0;font-size:1.05rem}}
-.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}} 
-.meta{{color:var(--muted);font-size:0.9rem;margin-top:6px}}
-.summary{{margin-top:8px;color:#222;white-space:pre-wrap}}
-.archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
-@media(max-width:800px){{ .container{{padding:18px;margin:18px}} }}
+:root { --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; --body-indent:12px; }
+html,body{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}
+.container{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}
+.header{margin-bottom:12px;}
+.header h1{margin:0;font-size:26px; /* header flush left inside container */ }
+.header .time{color:var(--muted);font-size:1rem;margin-top:6px}
+.error{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}
+.section{margin-top:18px}
+.section-title{margin:0 0 8px 0;font-size:1.25rem;} /* flush left */
+.section .section-body{padding-left:var(--body-indent);} /* indent all section body content */
+.news-item{padding:10px 0;border-bottom:1px solid #eee; padding-left:var(--body-indent);}
+.news-title{margin:0;font-size:1.05rem}
+.news-title a{color:var(--fg);text-decoration:underline;text-underline-offset:2px}
+.meta{color:var(--muted);font-size:0.9rem;margin-top:6px;padding-left:0}
+.summary{margin-top:8px;color:#222;white-space:pre-wrap;padding-left:0}
+.archive{margin-top:14px;padding-left:1rem;color:var(--muted)}
+@media(max-width:800px){ .container{padding:18px;margin:18px} }
 </style>
+
 </head>
 <body>
   <div class="container">

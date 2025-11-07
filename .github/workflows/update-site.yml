@@ -4,6 +4,7 @@ on:
   schedule:
     # runs daily at 06:55 UTC — change to your desired UTC time
     - cron: '55 06 * * *'
+    - cron: '05 12 * * *'
   workflow_dispatch: {}  # allows manual runs from Actions UI
 
 permissions:

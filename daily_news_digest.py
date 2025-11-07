@@ -27,14 +27,43 @@ except Exception:
 
 # -------- CONFIG ----------
 RSS_FEEDS = [
+    # News
     ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "News"),
     ("http://feeds.bbci.co.uk/news/world/rss.xml", "News"),
+    ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/front_page/rss.xml", "News"),
+    ("https://feeds.washingtonpost.com/rss/world", "News"),
     ("https://www.theguardian.com/world/rss", "News"),
     ("https://www.theguardian.com/uk-news/rss", "News"),
+    ("https://www.lemonde.fr/rss/une.xml", "News"),
+    ("https://www.oxfordmail.co.uk/news/rss/", "News"),
+    ("https://www.aljazeera.com/xml/rss/all.xml", "News"),
+    ("https://www.newyorker.com/feed/news", "News"),
+
+    # Politics
     ("https://www.theguardian.com/politics/rss", "Politics"),
+    ("https://feeds.feedburner.com/guidofawkes", "Politics"),
+    ("https://tribunemag.co.uk/feed/", "Politics"),
+    ("https://theintercept.com/feed/?rss", "Politics"),
+    ("https://www.foreignaffairs.com/rss.xml", "Politics"),
+
+    # Culture
+    ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/technology/rss.xml", "Culture"),
     ("https://www.theverge.com/rss/index.xml", "Culture"),
+    ("https://screenrant.com/feed/", "Culture"),
+    ("https://www.empireonline.com/rss/all.xml", "Culture"),
+    ("https://www.themarginalian.org/rss/", "Culture"),
+    ("https://aeon.co/feed", "Culture"),
+    ("https://pudding.cool/rss.xml", "Culture"),
+    
+    # Science
     ("https://www.nature.com/nature.rss", "Science"),
+    ("https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", "Science"),
+    ("https://www.chemistryworld.com/413.rss", "Science"),
+    ("https://www.sciencedaily.com/rss/top/science.xml", "Science"),
+
+    # Nature
     ("https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss", "Nature"),
+    ("https://tmbirding.blogspot.com/feeds/posts/default?alt=rss", "Nature"),
 ]
 MAX_ITEMS = 100
 SECTION_CAPS = {"News": 15}

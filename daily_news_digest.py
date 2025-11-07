@@ -2,11 +2,12 @@
 """
 daily_news_digest.py
 
-- Fetches RSS feeds (with sections).
-- Only considers items published after last_run.txt (ISO UTC).
-- Scores items by importance and picks top N without duplicates.
-- Writes digest.html, archive/digest-YYYYMMDDHHMMSS.html, last_run.txt, digest.log.
-- Deterministic, no external AI.
+- Fetches RSS feeds (tagged by section).
+- Considers items published in the last 24 hours only.
+- Scores items by importance and selects top N unique stories.
+- Enforces per-section caps: News=20, others=10; overall cap = MAX_ITEMS.
+- Writes digest.html (current), archive/digest-YYYYMMDDHHMMSS.html, and digest.log.
+- Deterministic. No external AI.
 """
 
 import os
@@ -18,7 +19,7 @@ import calendar
 import math
 from datetime import datetime, timezone, timedelta
 
-# --------------- CONFIG ----------------
+# ---------------- CONFIG ----------------
 # (feed_url, section)
 RSS_FEEDS = [
     ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml","News"),
@@ -63,10 +64,9 @@ MAX_ITEMS = 50
 OUT_PATH = "digest.html"
 ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"
-LAST_RUN_PATH = "last_run.txt"   # ISO UTC timestamp of last successful run
 # ----------------------------------------
 
-# --------------- ranking knobs ----------------
+# ---------- ranking knobs ----------
 SOURCE_PRIORITY = {
     "reuters": 1.3,
     "new york times": 1.15,
@@ -74,16 +74,17 @@ SOURCE_PRIORITY = {
     "bbc": 1.05,
     "guardian": 1.05,
     "economist": 1.2,
-    "al jazeera": 1.0,
     "wsj": 1.1,
     "wired": 1.0,
     "nature": 1.1,
 }
 KEYWORD_BOOSTS = {
     "climate": 2.0,
+    "energy": 1.6,
     "ai": 2.0,
-    "UK": 2.0,
-    "gay": 1.5,
+    "economy": 1.4,
+    "ukraine": 1.8,
+    "covid": 1.5,
 }
 WEIGHTS = {
     "source": 1.0,
@@ -94,8 +95,11 @@ WEIGHTS = {
     "dup": 0.9,
 }
 HALF_LIFE_HOURS = 8.0
-# ------------------------------------------------
+# per-section caps
+SECTION_CAPS = {"News": 20}
+DEFAULT_SECTION_CAP = 10
 
+# ---------- utilities ----------
 def safe_write(path, text):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -148,26 +152,6 @@ def short_summary_from_snippet(snippet):
 
 def timestamp_string():
     return datetime.utcnow().strftime("%Y%m%d%H%M%S")
-
-# ---------- persistence: last_run ----------
-def read_last_run():
-    if not os.path.isfile(LAST_RUN_PATH):
-        # default: 24 hours ago
-        return datetime.now(timezone.utc) - timedelta(hours=24)
-    try:
-        s = open(LAST_RUN_PATH, "r", encoding="utf-8").read().strip()
-        return datetime.fromisoformat(s)
-    except Exception:
-        return datetime.now(timezone.utc) - timedelta(hours=24)
-
-def write_last_run(ts=None):
-    ts = ts or datetime.now(timezone.utc).astimezone().isoformat()
-    try:
-        with open(LAST_RUN_PATH, "w", encoding="utf-8") as f:
-            f.write(ts)
-        return True
-    except Exception:
-        return False
 
 # ---------- scoring helpers ----------
 def _source_score(source_name):
@@ -224,17 +208,21 @@ def score_item(item, now=None, dup_count=1):
     )
     return score
 
-# ---------- HTML builder (simple centered layout with sections) ----------
+# ---------- HTML builder (News first, others alphabetical) ----------
 def build_html_digest(items_by_section, err_message=None):
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
-    # items_by_section: dict section -> list of items already sorted by score
-    sections_html = []
-    for sec in sorted(items_by_section.keys()):
-        sec_items = items_by_section[sec]
+    # Prepare section ordering: News first then alphabetically
+    keys = list(items_by_section.keys())
+    others = sorted([k for k in keys if k != "News"])
+    order = (["News"] if "News" in keys else []) + others
+
+    section_blocks = []
+    for sec in order:
+        sec_items = items_by_section.get(sec, [])
         if not sec_items:
             continue
         blocks = []
-        for i, it in enumerate(sec_items, start=1):
+        for it in sec_items:
             t = html.escape(it.get("title","No title"))
             link = html.escape(it.get("link","#"))
             src = html.escape(it.get("source",""))
@@ -246,9 +234,9 @@ def build_html_digest(items_by_section, err_message=None):
                 f"<div class='meta'>{src} · {pub_txt}</div>"
                 f"<p class='summary'>{html.escape(summ)}</p></article>"
             )
-        sections_html.append(f"<section class='section'><h2 class='section-title'>{html.escape(sec)}</h2>" + "\n".join(blocks) + "</section>")
+        section_blocks.append(f"<section class='section'><h2 class='section-title'>{html.escape(sec)}</h2>" + "\n".join(blocks) + "</section>")
 
-    sections_block = "\n".join(sections_html) if sections_html else "<p>No items found.</p>"
+    sections_block = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
 
     # archives listing (latest 10)
     archives_html = ""
@@ -300,7 +288,10 @@ def run():
     log_lines = []
     items = []
     err = None
-    last_run = read_last_run()
+
+    # cutoff = last 24 hours
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    log_lines.append(f"cutoff:{cutoff.isoformat()}")
 
     # import feedparser late
     try:
@@ -308,11 +299,11 @@ def run():
     except Exception as e:
         err = f"ImportError: {type(e).__name__}: {e}"
         log_lines.append("ERROR: " + err)
-        safe_write(OUT_PATH, make_error_html(err))
+        safe_write(OUT_PATH, build_html_digest({} , err_message=err))
         safe_log_write(log_lines)
         return 0
 
-    # collect all items published after last_run
+    # collect items published within last 24 hours
     try:
         for url, section in RSS_FEEDS:
             try:
@@ -335,8 +326,8 @@ def run():
                                     break
                                 except Exception:
                                     pass
-                    # include only items strictly newer than last_run if published available
-                    if pub_dt and pub_dt <= last_run:
+                    # require a publish timestamp and be within last 24 hours
+                    if not pub_dt or pub_dt < cutoff:
                         continue
                     uid = uid_for(link, title)
                     items.append({
@@ -352,8 +343,9 @@ def run():
                 log_lines.append(f"FeedError [{url}]: {type(e2).__name__}: {e2}")
 
         if not items:
-            log_lines.append("info: no new items since last_run")
-        # dedupe by uid and count duplicates (if same uid seen multiple times in this collection)
+            log_lines.append("info: no items within 24 hours")
+
+        # dedupe & group counts (within candidate set)
         grouped = {}
         for it in items:
             u = it["uid"]
@@ -361,7 +353,6 @@ def run():
                 grouped[u] = {"item": it, "count": 1}
             else:
                 existing = grouped[u]["item"]
-                # prefer the newer published value if present
                 a = it.get("published")
                 b = existing.get("published")
                 if a and (not b or a > b):
@@ -377,34 +368,30 @@ def run():
             sc = score_item(it, now=now, dup_count=count)
             scored.append((sc, it, count))
 
-        # sort by score descending and pick top N
+        # sort by score descending
         scored.sort(key=lambda x: x[0], reverse=True)
-        top = scored[:MAX_ITEMS]
-        
-        # group selected items by section with per-section caps (News=20, others=10)
+
+        # select top with per-section caps and overall MAX_ITEMS
         items_by_section = {}
-        caps = {"News": 20}
-        default_cap = 10
         total_selected = 0
-        
-        for score, it, count in top:
-            # stop if we've reached the overall MAX_ITEMS
+        for sc, it, count in scored:
             if total_selected >= MAX_ITEMS:
                 break
             sec = it.get("section") or "Other"
-            cap = caps.get(sec, default_cap)
+            cap = SECTION_CAPS.get(sec, DEFAULT_SECTION_CAP)
             bucket = items_by_section.setdefault(sec, [])
             if len(bucket) >= cap:
-                # this section is full; skip this item
                 continue
             bucket.append(it)
             total_selected += 1
+
+        # ensure News appears first and others alphabetical in HTML builder (handled there)
 
         # build HTML and write files
         html_page = build_html_digest(items_by_section)
         wrote = safe_write(OUT_PATH, html_page)
         log_lines.append(f"wrote:{OUT_PATH} ok={wrote}")
-        log_lines.append(f"selected_items:{len(top)} total_candidates:{len(scored)}")
+        log_lines.append(f"selected_items:{total_selected} total_candidates:{len(scored)}")
 
         # write archive
         ts = timestamp_string()
@@ -414,15 +401,10 @@ def run():
         wrote_archive = safe_write(archive_path, html_page)
         log_lines.append(f"archive:{archive_path} ok={wrote_archive}")
 
-        # update last_run ONLY if run succeeded (write ISO UTC)
-        now_iso = datetime.now(timezone.utc).astimezone().isoformat()
-        wrote_lr = write_last_run(now_iso)
-        log_lines.append(f"last_run_written:{wrote_lr} value:{now_iso}")
-
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         log_lines.append("ERROR: " + err)
-        safe_write(OUT_PATH, make_error_html(err))
+        safe_write(OUT_PATH, build_html_digest({} , err_message=err))
     finally:
         safe_log_write(log_lines)
     return 0

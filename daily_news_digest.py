@@ -8,6 +8,7 @@ daily_news_digest.py
 - Enforces per-section caps: News=20, others=10; overall cap = MAX_ITEMS.
 - Writes digest.html (current), archive/digest-YYYYMMDDHHMMSS.html, and digest.log.
 - Deterministic. No external AI.
+- Updated: local-time rendering (Europe/London) and larger headings, longer summaries.
 """
 
 import os
@@ -19,6 +20,14 @@ import calendar
 import math
 from datetime import datetime, timezone, timedelta
 
+# Prefer zoneinfo for explicit timezone handling
+try:
+    from zoneinfo import ZoneInfo
+    LOCAL_TZ = ZoneInfo("Europe/London")
+except Exception:
+    # fallback to system local tz if zoneinfo unavailable
+    LOCAL_TZ = datetime.now().astimezone().tzinfo
+
 # ---------------- CONFIG ----------------
 # (feed_url, section)
 RSS_FEEDS = [
@@ -27,7 +36,6 @@ RSS_FEEDS = [
     ("https://www.theguardian.com/world/rss","News"),
     ("https://www.theguardian.com/uk/rss","News"),
     ("https://www.lemonde.fr/rss/une.xml","News"),
-    ("https://www.france24.com/en/rss","News"),
     ("https://www.theguardian.com/politics/rss","Politics"),
     ("https://feeds.feedburner.com/guidofawkes","Politics"),
     ("https://tribunemag.co.uk/feed/","Politics"),
@@ -41,8 +49,7 @@ RSS_FEEDS = [
     ("https://www.empireonline.com/rss/all.xml","Film"),
 ]
 
-
-MAX_ITEMS = 50
+MAX_ITEMS = 100
 OUT_PATH = "digest.html"
 ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"
@@ -78,7 +85,7 @@ WEIGHTS = {
 }
 HALF_LIFE_HOURS = 8.0
 # per-section caps
-SECTION_CAPS = {"News": 20}
+SECTION_CAPS = {"News": 15}
 DEFAULT_SECTION_CAP = 10
 
 # ---------- utilities ----------
@@ -119,7 +126,8 @@ def parse_struct_time(tp):
     except Exception:
         return None
 
-def short_summary_from_snippet(snippet):
+# allow longer summaries up to 500 chars, prefer sentence boundaries
+def short_summary_from_snippet(snippet, max_chars=500):
     if not snippet:
         return ""
     text = re.sub(r"<[^>]+>", " ", snippet)
@@ -127,10 +135,23 @@ def short_summary_from_snippet(snippet):
     if not text:
         return ""
     sentences = re.split(r'(?<=[.!?])\s+', text)
-    short = " ".join(sentences[:2])
-    if len(short) > 240:
-        short = short[:237].rsplit(" ", 1)[0] + "..."
-    return short
+    # join sentences until close to max_chars
+    out = ""
+    for s in sentences:
+        if not out:
+            candidate = s
+        else:
+            candidate = out + " " + s
+        if len(candidate) <= max_chars:
+            out = candidate
+        else:
+            break
+    if not out:
+        # fallback to truncation at max_chars
+        out = text[:max_chars].rsplit(" ", 1)[0]
+        if len(out) < len(text):
+            out = out + "..."
+    return out
 
 def timestamp_string():
     return datetime.utcnow().strftime("%Y%m%d%H%M%S")
@@ -178,7 +199,7 @@ def score_item(item, now=None, dup_count=1):
     s_recency = _recency_score(item.get("published"), now=now)
     s_keyword = _keyword_score((item.get("title","") + " " + item.get("summary","")))
     s_title = _title_signal(item.get("title",""))
-    s_summary_len = min(1.0, len(item.get("summary","")) / 300.0)
+    s_summary_len = min(1.0, len(item.get("summary","")) / 500.0)  # normalized to 500
     s_dup = math.log1p(dup_count)
     score = (
         WEIGHTS["source"] * s_source +
@@ -191,8 +212,41 @@ def score_item(item, now=None, dup_count=1):
     return score
 
 # ---------- HTML builder (News first, others alphabetical) ----------
+def format_top_updated(now_utc):
+    """
+    Format the top 'Updated:' string using LOCAL_TZ in form:
+    'Updated: AM Thursday 6 November 2025' (AM/PM then weekday then day month year)
+    """
+    try:
+        local = now_utc.astimezone(LOCAL_TZ)
+    except Exception:
+        local = now_utc.astimezone()
+    hour = local.hour
+    ampm = "AM" if hour < 12 else "PM"
+    weekday = local.strftime("%A")            # Thursday
+    day = local.day                           # 6
+    month = local.strftime("%B")              # November
+    year = local.year                         # 2025
+    return f"Updated: {ampm} {weekday} {day} {month} {year}"
+
+def format_pub_local(pub_dt):
+    """
+    Convert published UTC datetime to local time string.
+    Format: YYYY-MM-DD HH:MM ZZZ (e.g. 2025-11-06 10:11 GMT)
+    """
+    if not pub_dt:
+        return ""
+    try:
+        local = pub_dt.astimezone(LOCAL_TZ)
+    except Exception:
+        local = pub_dt.astimezone()
+    # include timezone abbreviation if available
+    return local.strftime("%Y-%m-%d %H:%M %Z")
+
 def build_html_digest(items_by_section, err_message=None):
-    now_iso = datetime.now(timezone.utc).astimezone().isoformat()
+    now_utc = datetime.now(timezone.utc)
+    updated_label = format_top_updated(now_utc)
+
     # Prepare section ordering: News first then alphabetically
     keys = list(items_by_section.keys())
     others = sorted([k for k in keys if k != "News"])
@@ -209,8 +263,8 @@ def build_html_digest(items_by_section, err_message=None):
             link = html.escape(it.get("link","#"))
             src = html.escape(it.get("source",""))
             pub = it.get("published")
-            pub_txt = pub.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if pub else ""
-            summ = short_summary_from_snippet(it.get("summary","")) or (t + ".")
+            pub_txt = format_pub_local(pub) if pub else ""
+            summ = short_summary_from_snippet(it.get("summary",""), max_chars=500) or (t + ".")
             blocks.append(
                 f"<article class='news-item'><h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
                 f"<div class='meta'>{src} · {pub_txt}</div>"
@@ -234,6 +288,7 @@ def build_html_digest(items_by_section, err_message=None):
 
     error_block = f"<div class='error'>{html.escape(err_message)}</div>" if err_message else ""
 
+    # CSS tweaks: larger main heading and section headings; same monospace; centered container
     page = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -244,18 +299,24 @@ def build_html_digest(items_by_section, err_message=None):
 :root {{ --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; }}
 html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
 .container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}}
-.header{{margin-bottom:12px;}} .header h1{{margin:0;font-size:20px}} .header .time{{color:var(--muted);font-size:0.95rem;margin-top:6px}}
+.header{{margin-bottom:12px;}} 
+.header h1{{margin:0;font-size:26px}}             /* larger Daily News */
+.header .time{{color:var(--muted);font-size:1rem;margin-top:6px}} /* same font, clearer */
 .error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
-.section{{margin-top:18px}} .section-title{{margin:0 0 8px 0;font-size:1.1rem}}
-.news-item{{padding:10px 0;border-bottom:1px solid #eee}} .news-title{{margin:0;font-size:1.02rem}}
-.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}} .meta{{color:var(--muted);font-size:0.9rem;margin-top:6px}}
-.summary{{margin-top:8px;color:#222}} .archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
+.section{{margin-top:18px}} 
+.section-title{{margin:0 0 8px 0;font-size:1.25rem}} /* larger section headings */
+.news-item{{padding:10px 0;border-bottom:1px solid #eee}} 
+.news-title{{margin:0;font-size:1.05rem}}
+.news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}} 
+.meta{{color:var(--muted);font-size:0.9rem;margin-top:6px}}
+.summary{{margin-top:8px;color:#222;white-space:pre-wrap}}
+.archive{{margin-top:14px;padding-left:1rem;color:var(--muted)}}
 @media(max-width:800px){{ .container{{padding:18px;margin:18px}} }}
 </style>
 </head>
 <body>
   <div class="container">
-    <div class="header"><h1>Daily News</h1><div class="time">Last updated: {html.escape(now_iso)}</div></div>
+    <div class="header"><h1>Daily News</h1><div class="time">{html.escape(updated_label)}</div></div>
     {error_block}
     {sections_block}
     {archives_html}
@@ -366,8 +427,6 @@ def run():
                 continue
             bucket.append(it)
             total_selected += 1
-
-        # ensure News appears first and others alphabetical in HTML builder (handled there)
 
         # build HTML and write files
         html_page = build_html_digest(items_by_section)

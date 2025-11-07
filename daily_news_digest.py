@@ -2,11 +2,12 @@
 """
 daily_news_digest.py
 
-- Fetches RSS feeds.
+- Fetches RSS feeds (each feed tagged with a section).
 - Dedupes, ranks by published date.
 - Produces deterministic short summaries.
 - Writes digest.html (current) and archive/digest-YYYYMMDDHHMMSS.html (archive).
 - Writes digest.log for CI artifact debugging.
+- Groups headlines in the HTML by section.
 - Uses calendar.timegm() for struct_time -> epoch conversion.
 - Exits 0 so CI can upload artifacts even on failure.
 """
@@ -20,60 +21,61 @@ import calendar
 from datetime import datetime, timezone
 
 # ---------------- CONFIG ----------------
+# List of (feed_url, section_name)
 RSS_FEEDS = [
-    # --- General / High-Quality News (Centrist / Mainstream) ---
-    "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-    "http://feeds.reuters.com/reuters/topNews",
-    "https://www.theguardian.com/world/rss",
-    "http://feeds.bbci.co.uk/news/world/rss.xml",
-    "https://www.aljazeera.com/xml/rss/all.xml",
-    "https://www.economist.com/sections/international/rss.xml",
+    # General / High-Quality News
+    ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "News"),
+    ("http://feeds.reuters.com/reuters/topNews", "News"),
+    ("https://www.theguardian.com/world/rss", "News"),
+    ("http://feeds.bbci.co.uk/news/world/rss.xml", "News"),
+    ("https://www.aljazeera.com/xml/rss/all.xml", "News"),
+    ("https://www.economist.com/sections/international/rss.xml", "News"),
 
-    # --- Political Spectrum Additions ---
-    "https://www.wsj.com/xml/rss/3_7085.xml",
-    "https://www.theatlantic.com/feed/all/",
-    "https://www.nationalreview.com/feed/",
-    "https://www.americanprogress.org/feed/",
-    "https://reason.com/feed/",
-    "https://www.politico.com/rss/politics08.xml",
-    "https://www.foreignaffairs.com/rss.xml",
-    "https://theintercept.com/feed/?rss",
-    "https://www.foxnews.com/about/rss/",
-    "https://www.npr.org/rss/rss.php?id=1001",
-    "https://www.project-syndicate.org/feeds/latest",
+    # Political / Opinion
+    ("https://www.wsj.com/xml/rss/3_7085.xml", "Politics"),
+    ("https://www.theatlantic.com/feed/all/", "Politics"),
+    ("https://www.nationalreview.com/feed/", "Politics"),
+    ("https://www.americanprogress.org/feed/", "Politics"),
+    ("https://reason.com/feed/", "Politics"),
+    ("https://www.politico.com/rss/politics08.xml", "Politics"),
+    ("https://www.foreignaffairs.com/rss.xml", "Politics"),
+    ("https://theintercept.com/feed/?rss", "Politics"),
+    ("https://www.foxnews.com/about/rss/", "Politics"),
+    ("https://www.npr.org/rss/rss.php?id=1001", "Politics"),
+    ("https://www.project-syndicate.org/feeds/latest", "Politics"),
 
-    # --- Science ---
-    "https://www.nature.com/subjects/science.rss",
-    "https://www.scientificamerican.com/feed/rss/",
+    # Science
+    ("https://www.nature.com/subjects/science.rss", "Science"),
+    ("https://www.scientificamerican.com/feed/rss/", "Science"),
 
-    # --- Technology ---
-    "https://www.wired.com/feed/rss",
+    # Technology
+    ("https://www.wired.com/feed/rss", "Technology"),
 
-    # --- Arts & Culture ---
-    "https://www.nytimes.com/svc/collections/v1/publish/arts/rss.xml",
-    "https://www.theguardian.com/artanddesign/rss",
-    "https://hyperallergic.com/feed/",
+    # Arts & Culture
+    ("https://www.nytimes.com/svc/collections/v1/publish/arts/rss.xml", "Arts"),
+    ("https://www.theguardian.com/artanddesign/rss", "Arts"),
+    ("https://hyperallergic.com/feed/", "Arts"),
 
-    # --- Literature ---
-    "https://lithub.com/feed/",
-    "https://www.theparisreview.org/blog/feed/",
-    "https://www.poetryfoundation.org/rss/articles.xml",
-    "https://electricliterature.com/feed/",
+    # Literature
+    ("https://lithub.com/feed/", "Literature"),
+    ("https://www.theparisreview.org/blog/feed/", "Literature"),
+    ("https://www.poetryfoundation.org/rss/articles.xml", "Literature"),
+    ("https://electricliterature.com/feed/", "Literature"),
 
-    # --- Birdwatching / Nature ---
-    "https://ebird.org/news/feed/",
-    "https://www.birdguides.com/feed/news/",
-    "https://www.audubon.org/rss.xml",
+    # Nature / Birdwatching
+    ("https://ebird.org/news/feed/", "Nature"),
+    ("https://www.birdguides.com/feed/news/", "Nature"),
+    ("https://www.audubon.org/rss.xml", "Nature"),
 
-    # --- Knitting & Craft ---
-    "https://blog.tincanknits.com/feed/",
-    "https://www.interweave.com/feed/",
+    # Crafts
+    ("https://blog.tincanknits.com/feed/", "Crafts"),
+    ("https://www.interweave.com/feed/", "Crafts"),
 
-    # --- Movies & Film ---
-    "https://www.nytimes.com/svc/collections/v1/publish/entertainment/movies/rss.xml",
-    "https://www.empireonline.com/rss/all.xml",
-    "https://www.indiewire.com/feed/",
-    "https://screenrant.com/feed/"
+    # Film
+    ("https://www.nytimes.com/svc/collections/v1/publish/entertainment/movies/rss.xml", "Film"),
+    ("https://www.empireonline.com/rss/all.xml", "Film"),
+    ("https://www.indiewire.com/feed/", "Film"),
+    ("https://screenrant.com/feed/", "Film"),
 ]
 
 MAX_ITEMS = 50
@@ -125,33 +127,50 @@ def short_summary_from_snippet(snippet):
         short = short[:237].rsplit(" ", 1)[0] + "..."
     return short
 
-# ---------------- Presentation: simple centered layout ----------------
+# ---------------- Presentation: simple centered layout with sections ----------------
 def build_html_digest(items, err_message=None):
     """
-    Builds a simple centered page.
-    Includes latest articles and a short list of recent archive filenames (if any).
+    Build a centered page. Group items by their 'section' field.
     """
     now_iso = datetime.now(timezone.utc).astimezone().isoformat()
-    # build articles
-    articles = []
-    for i, it in enumerate(items[:MAX_ITEMS], start=1):
-        t = html.escape(it.get("title", "No title"))
-        link = html.escape(it.get("link", "#"))
-        src = html.escape(it.get("source", ""))
-        pub = it.get("published")
-        pub_txt = pub.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if pub else ""
-        summ = short_summary_from_snippet(it.get("summary", "")) or (t + ".")
-        article_html = (
-            f"<article class='news-item' id='item-{i}'>"
-            f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
-            f"<div class='meta'>{src} · {pub_txt}</div>"
-            f"<p class='summary'>{html.escape(summ)}</p>"
-            f"</article>"
-        )
-        articles.append(article_html)
-    articles_html = "\n".join(articles) if articles else "<p>No items found.</p>"
+    # Group items by section. Items are expected to have a 'section' key.
+    sections = {}
+    for it in items:
+        sec = it.get("section") or "Other"
+        sections.setdefault(sec, []).append(it)
 
-    # build archives list (latest 10)
+    # Sort sections alphabetically but keep 'News' first if present
+    section_keys = sorted([k for k in sections.keys() if k != "News"])
+    if "News" in sections:
+        section_keys = ["News"] + section_keys
+
+    # Build HTML for each section
+    section_blocks = []
+    for sec in section_keys:
+        sec_items = sections.get(sec, [])
+        if not sec_items:
+            continue
+        # within each section, sort by published desc
+        sec_items.sort(key=lambda x: (x.get("published") or datetime.fromtimestamp(0, tz=timezone.utc)), reverse=True)
+        items_html = []
+        for i, it in enumerate(sec_items, start=1):
+            t = html.escape(it.get("title", "No title"))
+            link = html.escape(it.get("link", "#"))
+            src = html.escape(it.get("source", ""))
+            pub = it.get("published")
+            pub_txt = pub.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if pub else ""
+            summ = short_summary_from_snippet(it.get("summary", "")) or (t + ".")
+            items_html.append(
+                f"<article class='news-item'><h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
+                f"<div class='meta'>{src} · {pub_txt}</div>"
+                f"<p class='summary'>{html.escape(summ)}</p></article>"
+            )
+        section_html = f"<section class='section'><h2 class='section-title'>{html.escape(sec)}</h2>" + "\n".join(items_html) + "</section>"
+        section_blocks.append(section_html)
+
+    sections_html = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
+
+    # archives (latest 10)
     archives_html = ""
     try:
         if os.path.isdir(ARCHIVE_DIR):
@@ -165,7 +184,6 @@ def build_html_digest(items, err_message=None):
 
     error_block = f"<div class='error'>{html.escape(err_message)}</div>" if err_message else ""
 
-    # minimal CSS matching your monospace, centered, max-width styling
     page = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -185,8 +203,10 @@ html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-f
 .header h1{{margin:0;font-size:20px}}
 .header .time{{color:var(--muted);font-size:0.95rem;margin-top:6px}}
 .error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
-.news-item{{padding:12px 0;border-bottom:1px solid #eee}}
-.news-title{{margin:0;font-size:1.05rem}}
+.section{{margin-top:18px}}
+.section-title{{margin:0 0 8px 0;font-size:1.1rem}}
+.news-item{{padding:10px 0;border-bottom:1px solid #eee}}
+.news-title{{margin:0;font-size:1.02rem}}
 .news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}}
 .meta{{color:var(--muted);font-size:0.9rem;margin-top:6px}}
 .summary{{margin-top:8px;color:#222}}
@@ -204,9 +224,7 @@ html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-f
     </div>
 
     {error_block}
-    <main class="news-list">
-      {articles_html}
-    </main>
+    {sections_html}
 
     {archives_html}
 
@@ -254,7 +272,10 @@ def run():
 
     # Fetch feeds
     try:
-        for url in RSS_FEEDS:
+        # prepare mapping from feed url to section for quick lookup
+        feed_section_map = {url: section for url, section in RSS_FEEDS}
+
+        for url, section in RSS_FEEDS:
             try:
                 d = feedparser.parse(url)
                 source = d.feed.get("title") or url
@@ -284,12 +305,13 @@ def run():
                         "link": link.strip(),
                         "summary": summary.strip(),
                         "source": source,
-                        "published": pub_dt
+                        "published": pub_dt,
+                        "section": feed_section_map.get(url, "Other")
                     })
             except Exception as e2:
                 log_lines.append(f"FeedError [{url}]: {type(e2).__name__}: {e2}")
 
-        # dedupe & rank
+        # dedupe & rank (chronological by default)
         seen = {}
         for it in items:
             u = it["uid"]
@@ -320,6 +342,11 @@ def run():
         ts = timestamp_string()
         archive_name = f"digest-{ts}.html"
         archive_path = os.path.join(ARCHIVE_DIR, archive_name)
+        # ensure archive dir exists
+        try:
+            os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        except Exception:
+            pass
         wrote_archive = safe_write(archive_path, html_body)
         log_lines.append(f"archive:{archive_path} ok={wrote_archive}")
     except Exception as e:

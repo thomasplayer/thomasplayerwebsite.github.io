@@ -54,7 +54,7 @@ RSS_FEEDS = [
     ("https://www.themarginalian.org/rss/", "Culture"),
     ("https://aeon.co/feed", "Culture"),
     ("https://pudding.cool/rss.xml", "Culture"),
-    
+
     # Science
     ("https://www.nature.com/nature.rss", "Science"),
     ("https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", "Science"),
@@ -75,21 +75,22 @@ HALF_LIFE_HOURS = 8.0
 
 # lightweight priority and keyword boosts (kept, simplified)
 SOURCE_PRIORITY = {
-    "reuters": 1.3,
-    "new york times": 1.15,
-    "nytimes": 1.15,
-    "bbc": 1.05,
-    "guardian": 1.05,
-    "economist": 1.2,
-    "wsj": 1.1,
-    "nature": 1.1,
+#    "bbc": 1.05,
+#    "guardian": 1.05,
+#    "nature": 1.1,
 }
 KEYWORD_BOOSTS = {
-    "climate": 2.0,
-    "energy": 1.6,
-    "ai": 2.0,
-    "economy": 1.4,
-    "ukraine": 1.8,
+    "star wars": 2.0,
+    "simpsons": 2.0,
+    "oxford": 2.0,
+    "knitting": 2.0,
+    "bird": 2.0,
+    "gluten": 2.0,
+#    "climate": 2.0,
+#    "energy": 1.6,
+#    "ai": 2.0,
+#    "economy": 1.4,
+#    "ukraine": 1.8,
 }
 
 # ---------------- utilities ----------------
@@ -183,7 +184,7 @@ def title_signal(title):
         return 0.0
     if any(ch.isdigit() for ch in title):
         return 1.0
-    return 0.6 if len(title.split()) <= 6 else 0.0
+    return 0.6 if len(title.split()) <= 8 else 0.0
 
 def score_item(item, now=None, dup_count=1):
     now = now or datetime.now(timezone.utc)

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Hardened daily_news_digest.py
+daily_news_digest.py
 
-Always writes:
- - docs/digest.html
- - digest.log
-
-Defers risky imports. Writes minimal error page and log on any failure.
-Exits with status 0 so CI can upload artifacts for debugging.
+- Fetches RSS feeds.
+- Dedupes, ranks by published date.
+- Produces deterministic short summaries.
+- Writes docs/digest.html (current) and docs/archive/digest-YYYYMMDDHHMMSS.html (archive).
+- Writes digest.log for CI artifact debugging.
+- Uses calendar.timegm() for struct_time -> epoch conversion.
+- Exits 0 so CI can upload artifacts even on failure.
 """
 
 import os
@@ -18,7 +19,7 @@ import html
 import calendar
 from datetime import datetime, timezone
 
-# Config
+# ---------------- CONFIG ----------------
 RSS_FEEDS = [
     "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
     "http://feeds.reuters.com/reuters/topNews",
@@ -26,16 +27,18 @@ RSS_FEEDS = [
 ]
 MAX_ITEMS = 10
 OUT_PATH = "docs/digest.html"
+ARCHIVE_DIR = "docs/archive"
 LOG_PATH = "digest.log"
+# ----------------------------------------
 
 def safe_write(path, text):
+    """Write text to path; attempt fallback to basename if dir write fails."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         return True
-    except Exception as e:
-        # best-effort fallback: try writing to current directory
+    except Exception:
         try:
             with open(os.path.basename(path), "w", encoding="utf-8") as f:
                 f.write(text)
@@ -46,13 +49,14 @@ def safe_write(path, text):
 def make_error_html(message):
     now = datetime.now(timezone.utc).astimezone().isoformat()
     safe_msg = html.escape(message)
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Digest Error</title></head><body>
-<h1>Daily News Digest — Error</h1>
-<p>Time: {html.escape(now)}</p>
-<div style="color:#b00;background:#fee;padding:8px;border:1px solid #fbb">{safe_msg}</div>
-<p>The script failed to generate the digest. See <code>digest.log</code> for details.</p>
-</body></html>"""
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'><title>Digest Error</title></head>"
+        "<body><h1>Daily News Digest — Error</h1>"
+        f"<p>Time: {html.escape(now)}</p>"
+        f"<div style='color:#b00;background:#fee;padding:8px;border:1px solid #fbb'>{safe_msg}</div>"
+        "<p>The script failed to generate the digest. See <code>digest.log</code> for details.</p>"
+        "</body></html>"
+    )
 
 def uid_for(link, title=""):
     return hashlib.sha1(((link or "") + (title or "")).encode("utf-8")).hexdigest()
@@ -72,18 +76,31 @@ def short_summary_from_snippet(snippet):
 
 def build_html_digest(items, err_message=None):
     now = datetime.now(timezone.utc).astimezone().isoformat()
-    header = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Daily News Digest</title></head><body><h1>Daily News Digest</h1><div>Last updated: {html.escape(now)}</div>"""
+    header = (
+        f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        f"<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>Daily News Digest</title></head><body>"
+        f"<h1>Daily News Digest</h1><div>Last updated: {html.escape(now)}</div>"
+    )
     if err_message:
-        header += f'<div style="color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0">{html.escape(err_message)}</div>'
+        header += (
+            "<div style='color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0'>"
+            f"{html.escape(err_message)}</div>"
+        )
     rows = []
     for it in items:
-        t = html.escape(it.get("title","No title"))
-        link = html.escape(it.get("link","#"))
-        src = html.escape(it.get("source",""))
+        t = html.escape(it.get("title", "No title"))
+        link = html.escape(it.get("link", "#"))
+        src = html.escape(it.get("source", ""))
         pub = it.get("published")
         pub_txt = pub.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if pub else ""
-        summ = short_summary_from_snippet(it.get("summary","")) or (t + ".")
-        rows.append(f'<div style="padding:12px 0;border-bottom:1px solid #eee"><div style="font-weight:600"><a href="{link}" target="_blank" rel="noopener">{t}</a></div><div style="color:#777;font-size:.9rem">{src} · {pub_txt}</div><div style="margin-top:6px">{html.escape(summ)}</div></div>')
+        summ = short_summary_from_snippet(it.get("summary", "")) or (t + ".")
+        rows.append(
+            f"<div style='padding:12px 0;border-bottom:1px solid #eee'>"
+            f"<div style='font-weight:600'><a href='{link}' target='_blank' rel='noopener'>{t}</a></div>"
+            f"<div style='color:#777;font-size:.9rem'>{src} · {pub_txt}</div>"
+            f"<div style='margin-top:6px'>{html.escape(summ)}</div></div>"
+        )
     footer = "<div style='color:#666;margin-top:1rem'>Generated automatically.</div></body></html>"
     return header + "\n".join(rows) + footer
 
@@ -101,19 +118,21 @@ def safe_log_write(lines):
         except Exception:
             return False
 
+def timestamp_string():
+    """UTC timestamp formatted as YYYYMMDDHHMMSS."""
+    return datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
 def run():
     log_lines = []
     items = []
     err = None
 
-    # Defer import and guard
+    # Defer import
     try:
         import feedparser
-        from feedparser.util import mktime_tz
     except Exception as e:
         err = f"ImportError: {type(e).__name__}: {e}"
         log_lines.append("ERROR: " + err)
-        # write minimal files and return
         safe_write(OUT_PATH, make_error_html(err))
         safe_log_write(log_lines)
         return 0
@@ -131,14 +150,19 @@ def run():
                     tp = e.get("published_parsed") or e.get("updated_parsed")
                     if tp:
                         try:
-                            pub_dt = datetime.fromtimestamp(int(mktime_tz(tp)), tz=timezone.utc)
+                            pub_dt = datetime.fromtimestamp(int(calendar.timegm(tp)), tz=timezone.utc)
                         except Exception:
-                            try:
-                                pub_dt = datetime.fromtimestamp(int(calendar.timegm(tp)), tz=timezone.utc)
-                            except Exception:
-                                pub_dt = datetime.fromtimestamp(0, tz=timezone.utc)
+                            pub_dt = datetime.fromtimestamp(0, tz=timezone.utc)
                     else:
                         pub_dt = None
+                        for k in ("published", "updated"):
+                            v = e.get(k)
+                            if v:
+                                try:
+                                    pub_dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                                    break
+                                except Exception:
+                                    pass
                     items.append({
                         "uid": uid_for(link, title),
                         "title": title.strip(),
@@ -149,6 +173,7 @@ def run():
                     })
             except Exception as e2:
                 log_lines.append(f"FeedError [{url}]: {type(e2).__name__}: {e2}")
+
         # dedupe & rank
         seen = {}
         for it in items:
@@ -158,18 +183,33 @@ def run():
             else:
                 a = it.get("published") or datetime.fromtimestamp(0, tz=timezone.utc)
                 b = seen[u].get("published") or datetime.fromtimestamp(0, tz=timezone.utc)
-                if a > b:
+                if a and b:
+                    if a > b:
+                        seen[u] = it
+                elif a and not b:
                     seen[u] = it
-        items = sorted(list(seen.values()), key=lambda x: (x.get("published") or datetime.fromtimestamp(0, tz=timezone.utc)), reverse=True)[:MAX_ITEMS]
 
+        items = sorted(
+            list(seen.values()),
+            key=lambda x: (x.get("published") or datetime.fromtimestamp(0, tz=timezone.utc)),
+            reverse=True
+        )[:MAX_ITEMS]
+
+        # Build current HTML
         html_body = build_html_digest(items)
-        ok = safe_write(OUT_PATH, html_body)
-        log_lines.append(f"wrote:{OUT_PATH} ok={ok}")
+        wrote_current = safe_write(OUT_PATH, html_body)
+        log_lines.append(f"wrote:{OUT_PATH} ok={wrote_current}")
         log_lines.append(f"items:{len(items)}")
+
+        # Write archive copy with UTC timestamp
+        ts = timestamp_string()
+        archive_name = f"digest-{ts}.html"
+        archive_path = os.path.join(ARCHIVE_DIR, archive_name)
+        wrote_archive = safe_write(archive_path, html_body)
+        log_lines.append(f"archive:{archive_path} ok={wrote_archive}")
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         log_lines.append("ERROR: " + err)
-        # write error page
         safe_write(OUT_PATH, make_error_html(err))
     finally:
         safe_log_write(log_lines)
@@ -177,7 +217,6 @@ def run():
 
 if __name__ == "__main__":
     code = run()
-    # ensure exit 0 so CI continues and artifacts upload
     try:
         sys.exit(code)
     except SystemExit:

@@ -70,13 +70,13 @@ a::after {
   margin-left: 0.35rem;
   font-weight: 600;
   font-size: 0.95em;
-  color: var(--accent);
   /* make pseudo purely decorative */
   pointer-events: none;
   vertical-align: baseline;
   opacity: 0.95;
 }
-a:hover, a:focus { text-decoration: underline; }
+a:hover, a:focus { text-decoration: underline; color: var(--accent);
+}
 
 /* In print, remove decorative caret */
 @media print {

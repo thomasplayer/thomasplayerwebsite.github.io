@@ -198,7 +198,7 @@ def build_html_digest(items_by_section, err_message=None):
                 "<article class='news-item'>"
                 f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{t}</a></h3>"
                 f"<p class='summary'>{html.escape(summ)}</p>"
-                f"<div class='meta'>{src}|{html.escape(pub_txt)}</div>"
+                f"<div class='meta'>{src} | {html.escape(pub_txt)}</div>"
                 "</article>"
             )
         section_html = (

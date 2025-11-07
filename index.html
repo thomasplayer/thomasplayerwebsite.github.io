@@ -1,118 +1,157 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<title>Thomas Player</title>
-	<style>
-		:root {
-			--bg: #fff;
-			--fg: #111;
-			--muted: #666;
-			--link-hover: #000;
-			--divider: #111;
-			--pad: 28px;
-			--gap: 24px;
-			--sidebar-w: 30%;
-			--sidebar-min: 200px;
-			--content-min: 300px;
-			--logo-size: 52px;
-			--logo-font: 60px;
-			--name-font: 22px;
-			--subtitle-font: 14px;
-		}
-		html, body {
-			margin: 0;
-			font-family: ui-monospace, monospace;
-			background: var(--bg);
-			color: var(--fg);
-			height: 100%;
-		}
-		body {
-			display: flex;
-			flex-wrap: wrap;
-			min-height: 100vh;
-			align-items: flex-start;
-		}
-		.content {
-			flex: 1 1 0;
-			min-width: var(--content-min);
-			padding: var(--pad);
-			overflow: auto;
-			box-sizing: border-box;
-		}
-		.sidebar {
-			flex: 0 0 var(--sidebar-w);
-			min-width: var(--sidebar-min);
-			padding: var(--pad);
-			display: flex;
-			flex-direction: column;
-			gap: var(--gap);
-			position: sticky;
-			top: 0;
-			align-self: flex-start;
-			box-sizing: border-box;
-		}
-		.brand {
-			display: flex;
-			align-items: center;
-			gap: 14px;
-		}
-		.logo {
-			width: var(--logo-size);
-			height: var(--logo-size);
-			flex: 0 0 var(--logo-size);
-		}
-		.logo text {
-			font-size: var(--logo-font);
-			font-weight: 900;
-			dominant-baseline: middle;
-			text-anchor: middle;
-		}
-		.name { font-size: var(--name-font); font-weight: 700; }
-		.subtitle { color: var(--muted); font-size: var(--subtitle-font); }
-		a { color: var(--fg); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
-		a::after { content: "↗︎"; }
-		a:hover { color: var(--link-hover); }
-		.sidebar nav a { display: block; margin-bottom: 12px; }
-		.divider { width: 100%; border-top: 2px dashed var(--divider); margin: var(--gap) 0; }
-		@media(max-width:820px) {
-			body { flex-direction: column; }
-			.content { order: 1; width: 100%; }
-			.sidebar { order: 0; width: 100%; position: sticky; top: 0; }
-		}
-	</style>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thomas Player</title>
+    <style>
+        :root {
+            --bg: #fff;
+            --fg: #111;
+            --muted: #666;
+            --link-hover: #000;
+            --divider: #111;
+            --pad: 28px;
+            --gap: 24px;
+            --sidebar-w: 30%;
+            --sidebar-min: 200px;
+            --content-min: 600px;
+            --logo-size: 52px;
+            --logo-font: 60px;
+            --name-font: 22px;
+            --subtitle-font: 14px;
+        }
+        html, body {
+            margin: 0;
+            font-family: ui-monospace, monospace;
+            background: var(--bg);
+            color: var(--fg);
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        /* Centered container with fixed max width */
+        .container {
+            width: 100%;
+            max-width: 1000px; /* fixed maximum width requested */
+            display: flex;
+            flex-direction: row;
+            gap: 0;
+            box-sizing: border-box;
+            border-left: 1px solid transparent; /* keeps width consistent */
+            border-right: 1px solid transparent;
+            background: transparent;
+        }
+
+        /* Main content */
+        .content {
+            flex: 1 1 auto;
+            min-width: var(--content-min);
+            padding: var(--pad);
+            overflow: visible;
+            box-sizing: border-box;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            flex: 0 0 var(--sidebar-w);
+            min-width: var(--sidebar-min);
+            padding: var(--pad);
+            display: flex;
+            flex-direction: column;
+            gap: var(--gap);
+            box-sizing: border-box;
+            position: relative; /* not sticky */
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo {
+            width: var(--logo-size);
+            height: var(--logo-size);
+            flex: 0 0 var(--logo-size);
+        }
+
+        .logo text {
+            font-size: var(--logo-font);
+            font-weight: 900;
+            dominant-baseline: middle;
+            text-anchor: middle;
+        }
+
+        .name { font-size: var(--name-font); font-weight: 700; }
+        .subtitle { color: var(--muted); font-size: var(--subtitle-font); }
+
+        a {
+            color: var(--fg);
+            text-decoration: underline;
+            text-decoration-thickness: 1px;
+            text-underline-offset: 2px;
+        }
+
+        a::after { content: "↗︎"; }
+        a:hover { color: var(--link-hover); }
+
+        .sidebar nav a { display: block; margin-bottom: 12px; }
+        .divider { width: 100%; border-top: 2px dashed var(--divider); margin: var(--gap) 0; }
+
+        @media(max-width: 820px) {
+            .container { flex-direction: column; }
+            .content { order: 1; width: 100%; }
+            .sidebar { order: 0; width: 100%; }
+        }
+
+        /* Small visual reset for embedded previews */
+        h2 { margin-top: 0; }
+        body { background: #fff; }
+    </style>
 </head>
 <body>
-	<main class="content">
-		<section id="home"></section>
-		<section id="about">
-			<h2>About</h2>
-			<p>Hi — I'm Thomas, a science writer and tutor based in Oxford.</p>
-		</section>
-		<div class="divider"></div>
-		<section id="contact">
-			<h2>Contact</h2>
-			<p>Email: <a href="mailto:hello@thomasplayer.me">hello@thomasplayer.me</a></p>
-		</section>
-		<div class="divider"></div>
-	</main>
-	<div class="sidebar">
-		<div class="brand">
-			<svg class="logo" viewBox="0 0 100 100">
-				<rect width="100" height="100" fill="var(--fg)" />
-				<text x="50" y="50" font-family="monospace" fill="var(--bg)">TP</text>
-			</svg>
-			<div>
-				<div class="subtitle">Thomas</div>
-				<div class="name">Player</div>
-			</div>
-		</div>
-		<nav>
-			<a href="#home">Home</a>
-			<a href="#about">About</a>
-			<a href="mailto:hello@thomasplayer.me">Contact</a>
-		</nav>
-	</div>
+    <div class="container">
+        <main class="content">
+            <section id="home">
+                <h1>Thomas Player</h1>
+                <p style="margin-top:0; color:var(--muted)">Science writer & tutor — Oxford</p>
+            </section>
+
+            <section id="about">
+                <h2>About</h2>
+                <p>Hi — I'm Thomas, a science writer and tutor based in Oxford.</p>
+            </section>
+
+            <div class="divider"></div>
+
+            <section id="contact">
+                <h2>Contact</h2>
+                <p>Email: <a href="mailto:hello@thomasplayer.me">hello@thomasplayer.me</a></p>
+            </section>
+
+        </main>
+
+        <aside class="sidebar">
+            <div class="brand">
+                <svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
+                    <rect width="100" height="100" fill="var(--fg)" />
+                    <text x="50" y="50" font-family="monospace" fill="var(--bg)">TP</text>
+                </svg>
+                <div>
+                    <div class="subtitle">Thomas</div>
+                    <div class="name">Player</div>
+                </div>
+            </div>
+
+            <nav>
+                <a href="#home">Home</a>
+                <a href="#about">About</a>
+                <a href="mailto:hello@thomasplayer.me">Contact</a>
+            </nav>
+        </aside>
+    </div>
 </body>
 </html>

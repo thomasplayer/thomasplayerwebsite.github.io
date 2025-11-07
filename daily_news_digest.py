@@ -247,10 +247,15 @@ def build_html_digest(items_by_section, err_message=None):
     now_utc = datetime.now(timezone.utc)
     updated_label = format_top_updated(now_utc)
 
-    # Prepare section ordering: News first then alphabetically
+    # Prepare section ordering: News first, then Politics, then alphabetically
     keys = list(items_by_section.keys())
-    others = sorted([k for k in keys if k != "News"])
-    order = (["News"] if "News" in keys else []) + others
+    others = sorted([k for k in keys if k not in ("News", "Politics")])
+    order = []
+    if "News" in keys:
+        order.append("News")
+    if "Politics" in keys:
+        order.append("Politics")
+    order += others
 
     section_blocks = []
     for sec in order:
@@ -298,13 +303,13 @@ def build_html_digest(items_by_section, err_message=None):
 <style>
 :root {{ --fg:#111; --muted:#666; --maxw:1000px; --pad:28px; }}
 html,body{{margin:0;padding:0;height:100%;background:#fff;color:var(--fg);font-family:ui-monospace,monospace;}}
-.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;}}
+.container{{max-width:var(--maxw);margin:36px auto;padding:var(--pad);box-sizing:border-box;padding-left:calc(var(--pad) + 12px);}}
 .header{{margin-bottom:12px;}} 
-.header h1{{margin:0;font-size:26px}}             /* larger Daily News */
+.header h1{{margin:0;font-size:26px;margin-left:-12px}}
 .header .time{{color:var(--muted);font-size:1rem;margin-top:6px}} /* same font, clearer */
 .error{{color:#b00;background:#fee;padding:8px;border:1px solid #fbb;margin:10px 0}}
 .section{{margin-top:18px}} 
-.section-title{{margin:0 0 8px 0;font-size:1.25rem}} /* larger section headings */
+.section-title{{margin:0 0 8px 0;font-size:1.25rem;margin-left:-12px}}
 .news-item{{padding:10px 0;border-bottom:1px solid #eee}} 
 .news-title{{margin:0;font-size:1.05rem}}
 .news-title a{{color:var(--fg);text-decoration:underline;text-underline-offset:2px}} 

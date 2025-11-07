@@ -31,22 +31,37 @@ except Exception:
 # ---------------- CONFIG ----------------
 # (feed_url, section)
 RSS_FEEDS = [
-    ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml","News"),
-    ("http://feeds.bbci.co.uk/news/world/rss.xml","News"),
-    ("https://www.theguardian.com/world/rss","News"),
-    ("https://www.theguardian.com/uk/rss","News"),
-    ("https://www.lemonde.fr/rss/une.xml","News"),
-    ("https://www.theguardian.com/politics/rss","Politics"),
-    ("https://feeds.feedburner.com/guidofawkes","Politics"),
-    ("https://tribunemag.co.uk/feed/","Politics"),
-    ("https://theintercept.com/feed/?rss","Politics"),
-    ("https://www.foreignaffairs.com/rss.xml","Politics"),
-    ("https://www.nature.com/subjects/science.rss","Science"),
-    ("https://www.scientificamerican.com/feed/rss/","Science"),
-    ("https://www.chemistryworld.com/rss","Science"),
-    ("https://www.audubon.org/rss.xml","Nature"),
-    ("https://screenrant.com/feed/","Film"),
-    ("https://www.empireonline.com/rss/all.xml","Film"),
+    # News
+    ("https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "News"),
+    ("http://feeds.bbci.co.uk/news/world/rss.xml", "News"),
+    ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/front_page/rss.xml", "News"),
+    ("https://feeds.washingtonpost.com/rss/world", "News"),
+    ("https://www.theguardian.com/world/rss", "News"),
+    ("https://www.theguardian.com/uk-news/rss", "News"),
+    ("https://www.lemonde.fr/rss/une.xml", "News"),
+    ("https://www.oxfordmail.co.uk/news/rss/", "News"),
+
+    # Politics
+    ("https://www.theguardian.com/politics/rss", "Politics"),
+    ("https://feeds.feedburner.com/guidofawkes", "Politics"),
+    ("https://tribunemag.co.uk/feed/", "Politics"),
+    ("https://theintercept.com/feed/?rss", "Politics"),
+    ("https://www.foreignaffairs.com/rss.xml", "Politics"),
+
+    # Culture
+    ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/technology/rss.xml", "Culture"),
+    ("https://www.theverge.com/rss/index.xml", "Culture"),
+    ("https://screenrant.com/feed/", "Culture"),
+    ("https://www.empireonline.com/rss/all.xml", "Culture"),
+
+    # Science
+    ("https://www.nature.com/nature.rss", "Science"),
+    ("https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science", "Science"),
+    ("https://www.chemistryworld.com/413.rss", "Science"),
+
+    # Nature
+    ("https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss", "Nature"),
+
 ]
 
 MAX_ITEMS = 100

@@ -111,6 +111,8 @@ def safe_write(path, text):
 def uid_for(link, title=""):
     return hashlib.sha1((link or "" + (title or "")).encode("utf-8")).hexdigest()
 
+
+
 def short_summary(snippet, max_chars=500):
     if not snippet:
         return ""
@@ -182,9 +184,9 @@ def keyword_score(text):
 def title_signal(title):
     if not title:
         return 0.0
-    if any(ch.isdigit() for ch in title):
-        return 1.0
-    return 0.6 if len(title.split()) <= 8 else 0.0
+    # if any(ch.isdigit() for ch in title):
+        # return 1.0
+    return 0.2 if len(title.split()) <= 8 else 0.0
 
 def score_item(item, now=None, dup_count=1):
     now = now or datetime.now(timezone.utc)

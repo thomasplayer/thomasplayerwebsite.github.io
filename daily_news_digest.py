@@ -116,24 +116,33 @@ def uid_for(link, title=""):
 def short_summary(snippet, max_chars=500):
     if not snippet:
         return ""
-    s = re.sub(r"<[^>]+>", " ", snippet)
+
+    # Replace paragraph-like breaks with a period
+    s = re.sub(r"</p>|<br\s*/?>|\n+", ".", snippet, flags=re.IGNORECASE)
+    # Remove any other HTML tags
+    s = re.sub(r"<[^>]+>", " ", s)
+    # Normalize whitespace
     s = re.sub(r"\s+", " ", s).strip()
+    # Replace accidental multiple periods (except ellipses)
+    # e.g., "Hello.." -> "Hello.", but "Hello..." stays "Hello..."
+    s = re.sub(r"(?<!\.)\.\.(?!\.)", ".", s)
+    # If already short enough, return
     if len(s) <= max_chars:
         return s
-    # try to cut at sentence boundary
+    # Try to cut at sentence boundary
     parts = re.split(r'(?<=[.!?])\s+', s)
     out = ""
     for p in parts:
-        if not out:
-            candidate = p
-        else:
-            candidate = out + " " + p
+        candidate = p if not out else out + " " + p
         if len(candidate) <= max_chars:
             out = candidate
         else:
             break
+    # If no sentence fits, truncate cleanly at a word boundary
     if not out:
         out = s[:max_chars].rsplit(" ", 1)[0] + "..."
+    # Final cleanup for double periods again (post-truncation)
+    out = re.sub(r"(?<!\.)\.\.(?!\.)", ".", out)
     return out
 
 def format_top_updated(now_utc):

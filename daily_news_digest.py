@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-Simplified daily_news_digest.py
+Improved daily_news_digest.py
 
-Keeps original features:
-- fetch RSS feeds (tagged by section)
-- consider items from last 24 hours
-- score items, enforce per-section caps and overall MAX_ITEMS
-- write digest.html, archive/digest-YYYYMMDDHHMMSS.html, and digest.log
-- deterministic, no external AI
-- renders local times in Europe/London
+Goals:
+- Preserve final HTML layout and semantics unchanged.
+- Fix bugs (uid_for), improve reliability (timeouts, parallel fetch), and clarify scoring.
+- Keep deterministic selection and stable tie-breakers.
+- Keep original RSS_FEEDS list intact.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -17,10 +15,12 @@ import math
 import hashlib
 import html
 import re
-# CHANGED: fix import name and use Counter for trending keywords
-from collections import Counter  # CHANGED: was `counter` originally
+import logging
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Tuple, Set
 
-# Prefer zoneinfo for explicit timezone handling
+# Prefer zoneinfo; fallback to system tz
 try:
     from zoneinfo import ZoneInfo
     LOCAL_TZ = ZoneInfo("Europe/London")
@@ -75,60 +75,62 @@ ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"
 HALF_LIFE_HOURS = 8.0
 
-# lightweight priority and keyword boosts (kept, simplified)
+# lightweight priority and keyword boosts
 SOURCE_PRIORITY = {
-#    "bbc": 1.05,
-#    "guardian": 1.05,
-#    "nature": 1.1,
+    # example: "bbc": 1.05,
 }
 KEYWORD_BOOSTS = {
     "star wars": 1.5,
     "the simpsons": 1.5,
-#    "oxford": 2.0,
-#    "knitting": 2.0,
-#    "bird": 2.0,
     "gluten": 1.5,
-#    "climate": 2.0,
-#    "energy": 1.6,
-#    "ai": 2.0,
-#    "economy": 1.4,
-#    "ukraine": 1.8,
 }
 
+# network / parallel fetch settings
+FEED_WORKERS = 8
+FEED_FETCH_TIMEOUT = 12  # seconds per feed (future.result timeout); parse itself may block in thread
+
+# minimal stopwords (deterministic)
+STOPWORDS = {
+    "the","a","an","and","or","of","in","on","for","to","with","by","from","is","are","was",
+    "it","its","that","this","at","as","be","has","have","will","new","update"
+}
+
+# logging basic
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
 # ---------------- utilities ----------------
-def safe_write(path, text):
+def safe_write(path: str, text: str) -> bool:
+    """
+    Create parent dir if needed. Return True if write succeeded.
+    If writing to intended path fails, do not silently write to cwd; log and return False.
+    """
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         return True
-    except Exception:
-        try:
-            with open(os.path.basename(path), "w", encoding="utf-8") as f:
-                f.write(text)
-            return True
-        except Exception:
-            return False
+    except Exception as e:
+        logging.error("safe_write failed for %s: %s", path, e)
+        return False
 
-def uid_for(link, title=""):
-    return hashlib.sha1((link or "" + (title or "")).encode("utf-8")).hexdigest()
+def uid_for(link: str, title: str = "") -> str:
+    """
+    Fixed UID creation. Deterministic SHA1 of concatenated link+title.
+    """
+    base = (link or "") + (title or "")
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
-def short_summary(snippet, max_chars=500):
+def short_summary(snippet: str, max_chars: int = 500) -> str:
     if not snippet:
         return ""
-    # Replace paragraph-like breaks with a period
     s = re.sub(r"</p>|<br\s*/?>|\n+", ".", snippet, flags=re.IGNORECASE)
-    # Remove any other HTML tags
     s = re.sub(r"<[^>]+>", " ", s)
-    # Normalize whitespace
     s = re.sub(r"\s+", " ", s).strip()
-    # Replace accidental multiple periods (except ellipses)
-    # e.g., "Hello.." -> "Hello.", but "Hello..." stays "Hello..."
     s = re.sub(r"(?<!\.)\.\.(?!\.)", ".", s)
-    # If already short enough, return
     if len(s) <= max_chars:
         return s
-    # Try to cut at sentence boundary
     parts = re.split(r'(?<=[.!?])\s+', s)
     out = ""
     for p in parts:
@@ -137,22 +139,23 @@ def short_summary(snippet, max_chars=500):
             out = candidate
         else:
             break
-    # If no sentence fits, truncate cleanly at a word boundary
     if not out:
         out = s[:max_chars].rsplit(" ", 1)[0] + "..."
-    # Final cleanup for double periods again (post-truncation)
     out = re.sub(r"(?<!\.)\.\.(?!\.)", ".", out)
     return out
 
-def format_top_updated(now_utc):
+def format_top_updated(now_utc: datetime) -> str:
     try:
         local = now_utc.astimezone(LOCAL_TZ)
     except Exception:
         local = now_utc.astimezone()
     ampm = "AM" if local.hour < 12 else "PM"
-    return f"Updated: {ampm} {local.strftime('%A %-d %B %Y')}" if os.name != "nt" else f"Updated: {ampm} {local.strftime('%A %#d %B %Y')}"
+    if os.name != "nt":
+        return f"Updated: {ampm} {local.strftime('%A %-d %B %Y')}"
+    else:
+        return f"Updated: {ampm} {local.strftime('%A %#d %B %Y')}"
 
-def format_pub_local(pub_dt):
+def format_pub_local(pub_dt: datetime) -> str:
     if not pub_dt:
         return ""
     try:
@@ -162,7 +165,7 @@ def format_pub_local(pub_dt):
     return local.strftime("%Y-%m-%d %H:%M %Z")
 
 # ---------------- scoring ----------------
-def source_score(source):
+def source_score(source: str) -> float:
     if not source:
         return 1.0
     s = source.lower()
@@ -171,7 +174,7 @@ def source_score(source):
             return v
     return 1.0
 
-def recency_score(published_dt, now=None):
+def recency_score(published_dt: datetime, now: datetime = None) -> float:
     if not published_dt:
         return 0.0
     now = now or datetime.now(timezone.utc)
@@ -179,39 +182,197 @@ def recency_score(published_dt, now=None):
     half = HALF_LIFE_HOURS * 3600.0
     return math.pow(2.0, -age / half)
 
-def keyword_score(text):
+def title_signal(title: str) -> float:
+    if not title:
+        return 0.0
+    return 0.2 if len(title.split()) <= 8 else 0.0
+
+# Improved keyword matching: use word-boundary regex for explicit boosts
+def explicit_keyword_score(text: str, explicit_boosts: Dict[str, float]) -> float:
     if not text:
         return 0.0
     t = text.lower()
     s = 0.0
-    for k, boost in KEYWORD_BOOSTS.items():
-        if k in t:
+    for phrase, boost in explicit_boosts.items():
+        # escape phrase for regex and require word boundaries where sensible
+        pat = r"\b" + re.escape(phrase.lower()) + r"\b"
+        if re.search(pat, t):
             s += boost
     return s
 
-def title_signal(title):
-    if not title:
-        return 0.0
-    # if any(ch.isdigit() for ch in title):
-        # return 1.0
-    return 0.2 if len(title.split()) <= 8 else 0.0
+# ---------------- tokenizer + clustering ----------------
+def tokenize(text: str) -> Set[str]:
+    if not text:
+        return set()
+    t = text.lower()
+    # keep apostrophes internal, remove other punctuation
+    t = re.sub(r"[^0-9a-z'\s]", " ", t)
+    toks = [w.strip("'") for w in t.split()]
+    toks = [w for w in toks if w and w not in STOPWORDS and len(w) > 1]
+    return set(toks)
 
-def score_item(item, now=None, dup_count=1):
-    now = now or datetime.now(timezone.utc)
-    s = (1.0 * source_score(item.get("source"))
-         + 1.6 * recency_score(item.get("published"), now=now)
-         + 2.0 * keyword_score(item.get("title","") + " " + item.get("summary",""))
-         + 0.6 * title_signal(item.get("title",""))
-         + 0.25 * min(1.0, len(item.get("summary","")) / 500.0)
-         + 0.9 * math.log1p(dup_count))
+def ngrams(tokens: List[str], n: int) -> List[str]:
+    if n < 2:
+        return []
+    return [" ".join(tokens[i:i+n]) for i in range(len(tokens)-n+1)]
+
+def jaccard(a: Set[str], b: Set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+def cluster_items(items: List[Dict], jaccard_threshold: float = 0.35) -> Tuple[List[List[int]], List[Set[str]]]:
+    # deterministic seed order: newest first; tie-break by uid
+    sorted_idx = sorted(range(len(items)),
+                        key=lambda i: ((items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc)).timestamp(),
+                                       items[i].get("uid","")),
+                        reverse=True)
+    clusters: List[List[int]] = []
+    cluster_token_sets: List[Set[str]] = []
+    for i in sorted_idx:
+        it = items[i]
+        # create token set that includes unigrams + bigrams (for phrase sensitivity)
+        base_tokens = sorted(tokenize(it.get("title","") + " " + it.get("summary","")))
+        toks_set = set(base_tokens)
+        # include bigrams and trigrams into token set for improved phrase matching in clustering/trending
+        for n in (2, 3):
+            ng = ngrams(base_tokens, n)
+            toks_set.update([g for g in ng if len(g) > 2])
+        placed = False
+        for ci, c_toks in enumerate(cluster_token_sets):
+            if jaccard(toks_set, c_toks) >= jaccard_threshold:
+                clusters[ci].append(i)
+                cluster_token_sets[ci] = c_toks | toks_set
+                placed = True
+                break
+        if not placed:
+            clusters.append([i])
+            cluster_token_sets.append(toks_set)
+    return clusters, cluster_token_sets
+
+def extract_trending_keywords(clusters: List[List[int]],
+                              cluster_token_sets: List[Set[str]],
+                              items: List[Dict],
+                              top_cluster_count: int = 8,
+                              top_k: int = 20) -> List[str]:
+    cluster_info = []
+    for idx, cl in enumerate(clusters):
+        top_pubs = sorted([items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc) for i in cl], reverse=True)
+        cluster_info.append((len(cl), top_pubs[0], idx))
+    cluster_info.sort(key=lambda x: (-x[0], -x[1].timestamp()))
+    chosen = [ci for _,_,ci in cluster_info[:top_cluster_count]]
+    freq = Counter()
+    for ci in chosen:
+        toks = cluster_token_sets[ci]
+        freq.update(toks)
+    # prefer multi-word tokens first (phrases), then single tokens, sorted by frequency and deterministically by token
+    candidates = sorted(freq.items(), key=lambda x: (-x[1], -len(x[0].split()), x[0]))
+    words = [t for t, c in candidates if len(t) > 2]
+    return words[:top_k]
+
+def keyword_match_score(item: Dict, trending_keywords: List[str], explicit_boosts: Dict[str, float]) -> float:
+    t = (item.get("title","") + " " + item.get("summary","")).lower()
+    s = 0.0
+    for i, kw in enumerate(trending_keywords):
+        # weight by position (earlier means more frequent)
+        weight = (len(trending_keywords) - i) / max(1, len(trending_keywords))
+        # word/phrase boundary check
+        pat = r"\b" + re.escape(kw) + r"\b"
+        if re.search(pat, t):
+            s += 1.0 * weight
+    s += explicit_keyword_score(t, explicit_boosts)
     return s
 
-# ---------------- HTML builder (preserve layout) ----------------
-def build_html_digest(items_by_section, err_message=None):
+def compute_final_scores(items: List[Dict]) -> Tuple[List[List[int]], List[Dict], List[str]]:
+    clusters, cluster_token_sets = cluster_items(items, jaccard_threshold=0.35)
+    cluster_meta = []
+    for ci, cl in enumerate(clusters):
+        size = len(cl)
+        # rep_idx: deterministic representative: newest published then uid
+        rep_idx = sorted(cl, key=lambda i: ((items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc)).timestamp(), items[i]["uid"]), reverse=True)[0]
+        cluster_meta.append({"index": ci, "size": size, "rep_idx": rep_idx})
+    trending = extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=25)
+
+    uid_to_dup = {}
+    for ci, cl in enumerate(clusters):
+        for i in cl:
+            uid = items[i]["uid"]
+            uid_to_dup[uid] = uid_to_dup.get(uid, 0) + 1
+
+    now = datetime.now(timezone.utc)
+    for i, it in enumerate(items):
+        dup_count = uid_to_dup.get(it["uid"], 1)
+        # determine cluster size
+        cluster_index = next((m["index"] for m in cluster_meta if i in clusters[m["index"]]), None)
+        cluster_size = 0 if cluster_index is None else cluster_meta[cluster_index]["size"]
+        cluster_factor = 1.0 + math.log1p(cluster_size) if cluster_size > 1 else 1.0
+        base = (1.0 * source_score(it.get("source"))
+                + 1.6 * recency_score(it.get("published"), now=now)
+                + 0.6 * title_signal(it.get("title",""))
+                + 0.25 * min(1.0, len(it.get("summary","")) / 500.0)
+                + 0.9 * math.log1p(dup_count))
+        kw_score = keyword_match_score(it, trending, KEYWORD_BOOSTS)
+        it["final_score"] = base * cluster_factor + 2.0 * kw_score
+        it["cluster_size"] = cluster_size
+    return clusters, cluster_meta, trending
+
+def select_items(items: List[Dict], max_items: int = MAX_ITEMS, headline_slots_preferred: int = 8) -> List[Dict]:
+    # ensure UID and published defaults
+    for it in items:
+        if "uid" not in it:
+            it["uid"] = uid_for(it.get("link",""), it.get("title",""))
+        if "published" not in it or it["published"] is None:
+            it["published"] = datetime.min.replace(tzinfo=timezone.utc)
+
+    clusters, cluster_meta, trending = compute_final_scores(items)
+
+    # headline clusters are those with size > 1 (multi-source corroboration)
+    headline_clusters = [m for m in cluster_meta if m["size"] > 1]
+    # deterministic sort: size desc, rep final_score desc, rep published desc, rep uid asc
+    headline_clusters.sort(key=lambda m: (-m["size"],
+                                          -items[m["rep_idx"]].get("final_score", 0.0),
+                                          -int((items[m["rep_idx"]].get("published") or datetime.min).timestamp()),
+                                          items[m["rep_idx"]]["uid"]))
+    headline_slots = min(headline_slots_preferred, len(headline_clusters))
+
+    selected: List[Dict] = []
+    selected_uids: Set[str] = set()
+
+    # pick headline representatives
+    for m in headline_clusters[:headline_slots]:
+        rep = items[m["rep_idx"]]
+        selected.append(rep)
+        selected_uids.add(rep["uid"])
+
+    # remaining sorted by final_score desc, published desc, source asc, uid asc
+    remaining = sorted([it for it in items if it["uid"] not in selected_uids],
+                       key=lambda it: (-it.get("final_score", 0.0),
+                                       -int((it.get("published") or datetime.min).timestamp()),
+                                       it.get("source",""),
+                                       it["uid"]))
+    caps = SECTION_CAPS.copy()
+    def get_cap(section: str) -> int:
+        return caps.get(section, DEFAULT_SECTION_CAP)
+
+    for it in remaining:
+        sec = it.get("section","Misc") or "Misc"
+        if sum(1 for s in selected if s.get("section","") == sec) >= get_cap(sec):
+            continue
+        selected.append(it)
+        selected_uids.add(it["uid"])
+        if len(selected) >= max_items:
+            break
+
+    return selected
+
+# ---------------- HTML builder (preserve layout exactly) ----------------
+# This function is intentionally left nearly identical to original to preserve final HTML.
+def build_html_digest(items_by_section: Dict[str, List[Dict]], err_message: str = None) -> str:
     now_utc = datetime.now(timezone.utc)
     updated_label = format_top_updated(now_utc)
 
-    # order: News, Politics, then alphabetical
     keys = list(items_by_section.keys())
     others = sorted(k for k in keys if k not in ("News", "Politics"))
     order = []
@@ -252,7 +413,6 @@ def build_html_digest(items_by_section, err_message=None):
 
     sections_block = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
 
-    # archives listing (latest 10) -- formatted link text from filename: HH:MM:SS DD Month YYYY (local Europe/London)
     archives_html = ""
     try:
         if os.path.isdir(ARCHIVE_DIR):
@@ -263,10 +423,8 @@ def build_html_digest(items_by_section, err_message=None):
                 for f in files[:10]:
                     display_time = None
                     try:
-                        # filename pattern: digest-YYYYMMDDHHMMSS.html
                         ts_str = f.removeprefix("digest-").removesuffix(".html")
                         dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-                        # convert to local timezone for display
                         try:
                             local_dt = dt.astimezone(LOCAL_TZ)
                         except Exception:
@@ -314,207 +472,109 @@ def build_html_digest(items_by_section, err_message=None):
 </html>"""
     return page
 
-# ---------------- deterministic clustering + keyword promotion (ADDED) ----------------
-STOPWORDS = {  # ADDED: stopwords for deterministic tokenizer
-    "the","a","an","and","or","of","in","on","for","to","with","by","from","is","are","was",
-    "it","its","that","this","at","as","be","has","have","will","new","update"
-}  # ADDED
+# ---------------- feed fetching ----------------
+def fetch_feed_entries(url: str, section: str) -> Tuple[str, str, List[Dict], str]:
+    """
+    Returns tuple (url, section, list_of_entries, error_message_or_empty)
+    Each entry is a dict with title, link, summary, published (datetime or None), etc.
+    """
+    try:
+        import feedparser
+    except Exception as e:
+        return url, section, [], f"ImportError: {type(e).__name__}: {e}"
 
-def tokenize(text):  # ADDED
-    if not text:
-        return set()
-    t = text.lower()
-    t = re.sub(r"[^0-9a-z'\s]", " ", t)
-    toks = [w.strip("'") for w in t.split()]
-    toks = [w for w in toks if w and w not in STOPWORDS and len(w) > 1]
-    return set(toks)  # ADDED
-
-def jaccard(a, b):  # ADDED
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
-
-def cluster_items(items, jaccard_threshold=0.35):  # ADDED
-    sorted_idx = sorted(range(len(items)),
-                        key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc)),
-                        reverse=True)
-    clusters = []
-    cluster_token_sets = []
-    for i in sorted_idx:
-        it = items[i]
-        toks = tokenize(it.get("title","") + " " + it.get("summary",""))
-        placed = False
-        for ci, c_toks in enumerate(cluster_token_sets):
-            if jaccard(toks, c_toks) >= jaccard_threshold:
-                clusters[ci].append(i)
-                cluster_token_sets[ci] = c_toks | toks
-                placed = True
-                break
-        if not placed:
-            clusters.append([i])
-            cluster_token_sets.append(toks)
-    return clusters, cluster_token_sets
-
-def extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=20):  # ADDED
-    cluster_info = []
-    for idx, cl in enumerate(clusters):
-        top_pubs = sorted([items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc) for i in cl], reverse=True)
-        cluster_info.append((len(cl), top_pubs[0], idx))
-    cluster_info.sort(key=lambda x: (-x[0], -x[1].timestamp()))
-    chosen = [ci for _,_,ci in cluster_info[:top_cluster_count]]
-    freq = Counter()
-    for ci in chosen:
-        toks = cluster_token_sets[ci]
-        freq.update(toks)
-    candidates = [t for t,c in freq.most_common() if len(t) > 2]
-    return candidates[:top_k]
-
-def keyword_match_score(item, trending_keywords, explicit_boosts):  # ADDED
-    t = (item.get("title","") + " " + item.get("summary","")).lower()
-    s = 0.0
-    for i, kw in enumerate(trending_keywords):
-        weight = (len(trending_keywords) - i) / max(1, len(trending_keywords))
-        if kw in t:
-            s += 1.0 * weight
-    for k, boost in explicit_boosts.items():
-        if k in t:
-            s += boost
-    return s
-
-def compute_final_scores(items):  # ADDED
-    clusters, cluster_token_sets = cluster_items(items, jaccard_threshold=0.35)
-    cluster_meta = []
-    for ci, cl in enumerate(clusters):
-        size = len(cl)
-        rep_idx = sorted(cl, key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc), items[i]["uid"]), reverse=True)[0]
-        cluster_meta.append({"index": ci, "size": size, "rep_idx": rep_idx})
-    trending = extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=25)
-
-    uid_to_dup = {}
-    for ci, cl in enumerate(clusters):
-        for i in cl:
-            uid = items[i]["uid"]
-            uid_to_dup[uid] = uid_to_dup.get(uid, 0) + 1
-
-    for i, it in enumerate(items):
-        dup_count = uid_to_dup.get(it["uid"], 1)
-        cluster_index = next((m["index"] for m in cluster_meta if i in clusters[m["index"]]), None)
-        cluster_size = 0 if cluster_index is None else cluster_meta[cluster_index]["size"]
-        cluster_factor = 1.0 + math.log1p(cluster_size) if cluster_size > 1 else 1.0
-        base = (1.0 * source_score(it.get("source"))
-                + 1.6 * recency_score(it.get("published"))
-                + 0.6 * title_signal(it.get("title",""))
-                + 0.25 * min(1.0, len(it.get("summary","")) / 500.0)
-                + 0.9 * math.log1p(dup_count))
-        kw_score = keyword_match_score(it, trending, KEYWORD_BOOSTS)
-        it["final_score"] = base * cluster_factor + 2.0 * kw_score
-        it["cluster_size"] = cluster_size
-    return clusters, cluster_meta, trending
-
-def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):  # ADDED
-    for it in items:
-        if "uid" not in it:
-            it["uid"] = uid_for(it.get("link",""), it.get("title",""))
-        if "published" not in it or it["published"] is None:
-            it["published"] = datetime.min.replace(tzinfo=timezone.utc)
-
-    clusters, cluster_meta, trending = compute_final_scores(items)
-
-    headline_clusters = [m for m in cluster_meta if m["size"] > 1]
-    headline_clusters.sort(key=lambda m: (-m["size"], -items[m["rep_idx"]]["final_score"], -int((items[m["rep_idx"]].get("published") or datetime.min).timestamp()), items[m["rep_idx"]]["uid"]))
-    headline_slots = min(headline_slots_preferred, len(headline_clusters))
-
-    selected = []
-    selected_uids = set()
-
-    for m in headline_clusters[:headline_slots]:
-        rep = items[m["rep_idx"]]
-        selected.append(rep)
-        selected_uids.add(rep["uid"])
-
-    remaining = sorted([it for it in items if it["uid"] not in selected_uids],
-                       key=lambda it: (-it.get("final_score", 0.0), -int((it.get("published") or datetime.min).timestamp()), it.get("source",""), it["uid"]))
-
-    caps = SECTION_CAPS.copy()
-    def get_cap(section):
-        return caps.get(section, DEFAULT_SECTION_CAP)
-
-    for it in remaining:
-        sec = it.get("section","Misc") or "Misc"
-        if sum(1 for s in selected if s.get("section","") == sec) >= get_cap(sec):
-            continue
-        selected.append(it)
-        if len(selected) >= max_items:
-            break
-
-    return selected
+    entries = []
+    err = ""
+    try:
+        doc = feedparser.parse(url)
+        # if parse had bozo exception, include message but continue if entries exist
+        if getattr(doc, "bozo", False) and getattr(doc, "bozo_exception", None):
+            logging.debug("feedparser bozo for %s: %s", url, doc.bozo_exception)
+            # do not fail hard; surface error in logs
+            err = f"ParseWarning: {doc.bozo_exception}"
+        source = doc.feed.get("title") or url
+        for e in doc.entries:
+            link = (e.get("link") or "").strip()
+            title = (e.get("title") or "").strip()
+            # prefer summary then description
+            summary = (e.get("summary") or e.get("description") or "").strip()
+            tp = e.get("published_parsed") or e.get("updated_parsed")
+            pub_dt = None
+            if tp:
+                try:
+                    import calendar
+                    pub_dt = datetime.fromtimestamp(calendar.timegm(tp), tz=timezone.utc)
+                except Exception:
+                    pub_dt = None
+            else:
+                v = e.get("published") or e.get("updated")
+                if v:
+                    try:
+                        pub_dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+                        if pub_dt.tzinfo is None:
+                            pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                    except Exception:
+                        pub_dt = None
+            entries.append({
+                "title": title,
+                "link": link,
+                "summary": summary,
+                "source": source,
+                "published": pub_dt,
+                "section": section
+            })
+    except Exception as ex:
+        logging.exception("fetch_feed_entries failure for %s", url)
+        err = f"{type(ex).__name__}: {ex}"
+    return url, section, entries, err
 
 # ---------------- main ----------------
-def run():
+def run() -> int:
     log_lines = []
-    items = []
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=24)
     log_lines.append(f"cutoff:{cutoff.isoformat()}")
 
-    try:
-        import feedparser
-    except Exception as e:
-        err = f"ImportError: {type(e).__name__}: {e}"
-        log_lines.append("ERROR: " + err)
-        safe_write(OUT_PATH, build_html_digest({}, err_message=err))
-        safe_write(LOG_PATH, "\n".join(log_lines) + "\n")
-        return 1
+    # parallel fetch of feeds with bounded workers
+    feed_results = []
+    with ThreadPoolExecutor(max_workers=FEED_WORKERS) as ex:
+        futures = {ex.submit(fetch_feed_entries, url, section): (url, section) for url, section in RSS_FEEDS}
+        for fut in as_completed(futures, timeout=None):
+            url, section = futures[fut]
+            try:
+                res = fut.result(timeout=FEED_FETCH_TIMEOUT)
+                feed_results.append(res)
+            except Exception as e:
+                msg = f"FeedFetchTimeout/Exception [{url}]: {type(e).__name__}: {e}"
+                logging.warning(msg)
+                log_lines.append(msg)
 
-    # collect items from feeds
-    for url, section in RSS_FEEDS:
-        try:
-            doc = feedparser.parse(url)
-            source = doc.feed.get("title") or url
-            for e in doc.entries:
-                link = (e.get("link") or "").strip()
-                title = (e.get("title") or "").strip()
-                summary = (e.get("summary") or e.get("description") or "").strip()
-                # Use feedparser's parsed time when present, else try ISO8601 if available
-                tp = e.get("published_parsed") or e.get("updated_parsed")
-                pub_dt = None
-                if tp:
-                    try:
-                        # feedparser gives struct_time-like
-                        import calendar
-                        pub_dt = datetime.fromtimestamp(calendar.timegm(tp), tz=timezone.utc)
-                    except Exception:
-                        pub_dt = None
-                else:
-                    v = e.get("published") or e.get("updated")
-                    if v:
-                        try:
-                            pub_dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-                            if pub_dt.tzinfo is None:
-                                pub_dt = pub_dt.replace(tzinfo=timezone.utc)
-                        except Exception:
-                            pub_dt = None
-                if not pub_dt or pub_dt < cutoff:
-                    continue
-                uid = uid_for(link, title)
-                items.append({
-                    "uid": uid,
-                    "title": title,
-                    "link": link,
-                    "summary": summary,
-                    "source": source,
-                    "published": pub_dt,
-                    "section": section
-                })
-        except Exception as fe:
-            log_lines.append(f"FeedError [{url}]: {type(fe).__name__}: {fe}")
+    items: List[Dict] = []
+    # process feed results, applying cutoff immediately
+    for url, section, entries, ferr in feed_results:
+        if ferr:
+            log_lines.append(f"FeedParseError [{url}]: {ferr}")
+        for e in entries:
+            pub_dt = e.get("published")
+            if not pub_dt or pub_dt < cutoff:
+                continue
+            link = e.get("link","")
+            title = e.get("title","")
+            uid = uid_for(link, title)
+            items.append({
+                "uid": uid,
+                "title": title,
+                "link": link,
+                "summary": e.get("summary",""),
+                "source": e.get("source",""),
+                "published": pub_dt,
+                "section": section
+            })
 
     if not items:
         log_lines.append("info: no items within 24 hours")
 
-    # dedupe by uid, keep newest instance and count duplicates (unchanged)
+    # dedupe by uid: keep newest published; count duplicates
     grouped = {}
     for it in items:
         u = it["uid"]
@@ -523,16 +583,14 @@ def run():
         else:
             existing = grouped[u]["item"]
             grouped[u]["count"] += 1
-            # keep the later published one
+            # keep later published
             if it.get("published") and existing.get("published") and it["published"] > existing["published"]:
                 grouped[u]["item"] = it
 
-    # CHANGED: replaced original scoring/sorting block with clustering-based selection (call select_items)
-    # ADDED: build candidates list for selection
-    candidates = [info["item"] for uid, info in grouped.items()]  # ADDED
-    selected = select_items(candidates, max_items=MAX_ITEMS)  # ADDED: use new deterministic selection pipeline
+    candidates = [info["item"] for uid, info in grouped.items()]
+    selected = select_items(candidates, max_items=MAX_ITEMS)
 
-    # ADDED: assemble items_by_section from selected items (respecting caps already enforced)
+    # assemble items_by_section preserving selection order
     items_by_section = {}
     total_selected = 0
     for it in selected:
@@ -544,9 +602,9 @@ def run():
     html_page = build_html_digest(items_by_section)
     ok = safe_write(OUT_PATH, html_page)
     log_lines.append(f"wrote:{OUT_PATH} ok={ok}")
-    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(candidates)}")  # CHANGED: log updated to reflect new flow
+    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(candidates)}")
 
-    # archive
+    # archive copy (UTC timestamp)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
     archive_path = os.path.join(ARCHIVE_DIR, f"digest-{ts}.html")

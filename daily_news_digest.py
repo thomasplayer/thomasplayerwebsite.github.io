@@ -17,6 +17,8 @@ import math
 import hashlib
 import html
 import re
+# CHANGED: fix import name and use Counter for trending keywords
+from collections import Counter  # CHANGED: was `counter` originally
 
 # Prefer zoneinfo for explicit timezone handling
 try:
@@ -111,12 +113,9 @@ def safe_write(path, text):
 def uid_for(link, title=""):
     return hashlib.sha1((link or "" + (title or "")).encode("utf-8")).hexdigest()
 
-
-
 def short_summary(snippet, max_chars=500):
     if not snippet:
         return ""
-
     # Replace paragraph-like breaks with a period
     s = re.sub(r"</p>|<br\s*/?>|\n+", ".", snippet, flags=re.IGNORECASE)
     # Remove any other HTML tags
@@ -315,6 +314,143 @@ def build_html_digest(items_by_section, err_message=None):
 </html>"""
     return page
 
+# ---------------- deterministic clustering + keyword promotion (ADDED) ----------------
+STOPWORDS = {  # ADDED: stopwords for deterministic tokenizer
+    "the","a","an","and","or","of","in","on","for","to","with","by","from","is","are","was",
+    "it","its","that","this","at","as","be","has","have","will","new","update"
+}  # ADDED
+
+def tokenize(text):  # ADDED
+    if not text:
+        return set()
+    t = text.lower()
+    t = re.sub(r"[^0-9a-z'\s]", " ", t)
+    toks = [w.strip("'") for w in t.split()]
+    toks = [w for w in toks if w and w not in STOPWORDS and len(w) > 1]
+    return set(toks)  # ADDED
+
+def jaccard(a, b):  # ADDED
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    union = len(a | b)
+    return inter / union if union else 0.0
+
+def cluster_items(items, jaccard_threshold=0.35):  # ADDED
+    sorted_idx = sorted(range(len(items)),
+                        key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc)),
+                        reverse=True)
+    clusters = []
+    cluster_token_sets = []
+    for i in sorted_idx:
+        it = items[i]
+        toks = tokenize(it.get("title","") + " " + it.get("summary",""))
+        placed = False
+        for ci, c_toks in enumerate(cluster_token_sets):
+            if jaccard(toks, c_toks) >= jaccard_threshold:
+                clusters[ci].append(i)
+                cluster_token_sets[ci] = c_toks | toks
+                placed = True
+                break
+        if not placed:
+            clusters.append([i])
+            cluster_token_sets.append(toks)
+    return clusters, cluster_token_sets
+
+def extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=20):  # ADDED
+    cluster_info = []
+    for idx, cl in enumerate(clusters):
+        top_pubs = sorted([items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc) for i in cl], reverse=True)
+        cluster_info.append((len(cl), top_pubs[0], idx))
+    cluster_info.sort(key=lambda x: (-x[0], -x[1].timestamp()))
+    chosen = [ci for _,_,ci in cluster_info[:top_cluster_count]]
+    freq = Counter()
+    for ci in chosen:
+        toks = cluster_token_sets[ci]
+        freq.update(toks)
+    candidates = [t for t,c in freq.most_common() if len(t) > 2]
+    return candidates[:top_k]
+
+def keyword_match_score(item, trending_keywords, explicit_boosts):  # ADDED
+    t = (item.get("title","") + " " + item.get("summary","")).lower()
+    s = 0.0
+    for i, kw in enumerate(trending_keywords):
+        weight = (len(trending_keywords) - i) / max(1, len(trending_keywords))
+        if kw in t:
+            s += 1.0 * weight
+    for k, boost in explicit_boosts.items():
+        if k in t:
+            s += boost
+    return s
+
+def compute_final_scores(items):  # ADDED
+    clusters, cluster_token_sets = cluster_items(items, jaccard_threshold=0.35)
+    cluster_meta = []
+    for ci, cl in enumerate(clusters):
+        size = len(cl)
+        rep_idx = sorted(cl, key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc), items[i]["uid"]), reverse=True)[0]
+        cluster_meta.append({"index": ci, "size": size, "rep_idx": rep_idx})
+    trending = extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=25)
+
+    uid_to_dup = {}
+    for ci, cl in enumerate(clusters):
+        for i in cl:
+            uid = items[i]["uid"]
+            uid_to_dup[uid] = uid_to_dup.get(uid, 0) + 1
+
+    for i, it in enumerate(items):
+        dup_count = uid_to_dup.get(it["uid"], 1)
+        cluster_index = next((m["index"] for m in cluster_meta if i in clusters[m["index"]]), None)
+        cluster_size = 0 if cluster_index is None else cluster_meta[cluster_index]["size"]
+        cluster_factor = 1.0 + math.log1p(cluster_size) if cluster_size > 1 else 1.0
+        base = (1.0 * source_score(it.get("source"))
+                + 1.6 * recency_score(it.get("published"))
+                + 0.6 * title_signal(it.get("title",""))
+                + 0.25 * min(1.0, len(it.get("summary","")) / 500.0)
+                + 0.9 * math.log1p(dup_count))
+        kw_score = keyword_match_score(it, trending, KEYWORD_BOOSTS)
+        it["final_score"] = base * cluster_factor + 2.0 * kw_score
+        it["cluster_size"] = cluster_size
+    return clusters, cluster_meta, trending
+
+def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):  # ADDED
+    for it in items:
+        if "uid" not in it:
+            it["uid"] = uid_for(it.get("link",""), it.get("title",""))
+        if "published" not in it or it["published"] is None:
+            it["published"] = datetime.min.replace(tzinfo=timezone.utc)
+
+    clusters, cluster_meta, trending = compute_final_scores(items)
+
+    headline_clusters = [m for m in cluster_meta if m["size"] > 1]
+    headline_clusters.sort(key=lambda m: (-m["size"], -items[m["rep_idx"]]["final_score"], -int((items[m["rep_idx"]].get("published") or datetime.min).timestamp()), items[m["rep_idx"]]["uid"]))
+    headline_slots = min(headline_slots_preferred, len(headline_clusters))
+
+    selected = []
+    selected_uids = set()
+
+    for m in headline_clusters[:headline_slots]:
+        rep = items[m["rep_idx"]]
+        selected.append(rep)
+        selected_uids.add(rep["uid"])
+
+    remaining = sorted([it for it in items if it["uid"] not in selected_uids],
+                       key=lambda it: (-it.get("final_score", 0.0), -int((it.get("published") or datetime.min).timestamp()), it.get("source",""), it["uid"]))
+
+    caps = SECTION_CAPS.copy()
+    def get_cap(section):
+        return caps.get(section, DEFAULT_SECTION_CAP)
+
+    for it in remaining:
+        sec = it.get("section","Misc") or "Misc"
+        if sum(1 for s in selected if s.get("section","") == sec) >= get_cap(sec):
+            continue
+        selected.append(it)
+        if len(selected) >= max_items:
+            break
+
+    return selected
+
 # ---------------- main ----------------
 def run():
     log_lines = []
@@ -378,7 +514,7 @@ def run():
     if not items:
         log_lines.append("info: no items within 24 hours")
 
-    # dedupe by uid, keep newest instance and count duplicates
+    # dedupe by uid, keep newest instance and count duplicates (unchanged)
     grouped = {}
     for it in items:
         u = it["uid"]
@@ -391,33 +527,24 @@ def run():
             if it.get("published") and existing.get("published") and it["published"] > existing["published"]:
                 grouped[u]["item"] = it
 
-    # score and sort
-    scored = []
-    for uid, info in grouped.items():
-        it = info["item"]
-        cnt = info["count"]
-        sc = score_item(it, now=now, dup_count=cnt)
-        scored.append((sc, it, cnt))
-    scored.sort(key=lambda x: x[0], reverse=True)
+    # CHANGED: replaced original scoring/sorting block with clustering-based selection (call select_items)
+    # ADDED: build candidates list for selection
+    candidates = [info["item"] for uid, info in grouped.items()]  # ADDED
+    selected = select_items(candidates, max_items=MAX_ITEMS)  # ADDED: use new deterministic selection pipeline
 
-    # select top with section caps and overall cap
+    # ADDED: assemble items_by_section from selected items (respecting caps already enforced)
     items_by_section = {}
     total_selected = 0
-    for sc, it, cnt in scored:
-        if total_selected >= MAX_ITEMS:
-            break
+    for it in selected:
         sec = it.get("section") or "Other"
-        cap = SECTION_CAPS.get(sec, DEFAULT_SECTION_CAP)
         bucket = items_by_section.setdefault(sec, [])
-        if len(bucket) >= cap:
-            continue
         bucket.append(it)
         total_selected += 1
 
     html_page = build_html_digest(items_by_section)
     ok = safe_write(OUT_PATH, html_page)
     log_lines.append(f"wrote:{OUT_PATH} ok={ok}")
-    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(scored)}")
+    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(candidates)}")  # CHANGED: log updated to reflect new flow
 
     # archive
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")

@@ -15,10 +15,13 @@ import math
 import hashlib
 import html
 import re
+<<<<<<< HEAD
 import logging
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Tuple, Set
+=======
+>>>>>>> parent of ca7692b (Update daily_news_digest.py new sorting algorithm jaccard)
 
 # Prefer zoneinfo; fallback to system tz
 try:
@@ -122,9 +125,19 @@ def uid_for(link: str, title: str = "") -> str:
     base = (link or "") + (title or "")
     return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
+<<<<<<< HEAD
 def short_summary(snippet: str, max_chars: int = 500) -> str:
     if not snippet:
         return ""
+=======
+
+
+def short_summary(snippet, max_chars=500):
+    if not snippet:
+        return ""
+
+    # Replace paragraph-like breaks with a period
+>>>>>>> parent of ca7692b (Update daily_news_digest.py new sorting algorithm jaccard)
     s = re.sub(r"</p>|<br\s*/?>|\n+", ".", snippet, flags=re.IGNORECASE)
     s = re.sub(r"<[^>]+>", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
@@ -472,6 +485,7 @@ def build_html_digest(items_by_section: Dict[str, List[Dict]], err_message: str 
 </html>"""
     return page
 
+<<<<<<< HEAD
 # ---------------- feed fetching ----------------
 def fetch_feed_entries(url: str, section: str) -> Tuple[str, str, List[Dict], str]:
     """
@@ -528,6 +542,8 @@ def fetch_feed_entries(url: str, section: str) -> Tuple[str, str, List[Dict], st
         err = f"{type(ex).__name__}: {ex}"
     return url, section, entries, err
 
+=======
+>>>>>>> parent of ca7692b (Update daily_news_digest.py new sorting algorithm jaccard)
 # ---------------- main ----------------
 def run() -> int:
     log_lines = []
@@ -574,7 +590,11 @@ def run() -> int:
     if not items:
         log_lines.append("info: no items within 24 hours")
 
+<<<<<<< HEAD
     # dedupe by uid: keep newest published; count duplicates
+=======
+    # dedupe by uid, keep newest instance and count duplicates
+>>>>>>> parent of ca7692b (Update daily_news_digest.py new sorting algorithm jaccard)
     grouped = {}
     for it in items:
         u = it["uid"]
@@ -587,22 +607,44 @@ def run() -> int:
             if it.get("published") and existing.get("published") and it["published"] > existing["published"]:
                 grouped[u]["item"] = it
 
+<<<<<<< HEAD
     candidates = [info["item"] for uid, info in grouped.items()]
     selected = select_items(candidates, max_items=MAX_ITEMS)
 
     # assemble items_by_section preserving selection order
+=======
+    # score and sort
+    scored = []
+    for uid, info in grouped.items():
+        it = info["item"]
+        cnt = info["count"]
+        sc = score_item(it, now=now, dup_count=cnt)
+        scored.append((sc, it, cnt))
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # select top with section caps and overall cap
+>>>>>>> parent of ca7692b (Update daily_news_digest.py new sorting algorithm jaccard)
     items_by_section = {}
     total_selected = 0
-    for it in selected:
+    for sc, it, cnt in scored:
+        if total_selected >= MAX_ITEMS:
+            break
         sec = it.get("section") or "Other"
+        cap = SECTION_CAPS.get(sec, DEFAULT_SECTION_CAP)
         bucket = items_by_section.setdefault(sec, [])
+        if len(bucket) >= cap:
+            continue
         bucket.append(it)
         total_selected += 1
 
     html_page = build_html_digest(items_by_section)
     ok = safe_write(OUT_PATH, html_page)
     log_lines.append(f"wrote:{OUT_PATH} ok={ok}")
+<<<<<<< HEAD
     log_lines.append(f"selected_items:{total_selected} total_candidates:{len(candidates)}")
+=======
+    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(scored)}")
+>>>>>>> parent of ca7692b (Update daily_news_digest.py new sorting algorithm jaccard)
 
     # archive copy (UTC timestamp)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")

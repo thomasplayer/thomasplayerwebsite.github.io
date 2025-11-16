@@ -35,6 +35,11 @@ RSS_FEEDS = [
     ("http://newsrss.bbc.co.uk/rss/newsonline_uk_edition/front_page/rss.xml", "News"),
     ("https://feeds.washingtonpost.com/rss/world", "News"),
     ("https://www.theguardian.com/rss", "News"),
+    ("https://feeds.skynews.com/feeds/rss/home.xml", "News"),
+    ("https://www.telegraph.co.uk/rss.xml","News"),
+    ("https://www.politics.co.uk/feed/","News"),
+    ("https://www.mirror.co.uk/?service=rss","News"),
+    ("https://theconversation.com/uk/articles.atom","News"),
     ("https://www.lemonde.fr/rss/une.xml", "News"),
     ("https://www.oxfordmail.co.uk/news/rss/", "News"),
     ("https://www.aljazeera.com/xml/rss/all.xml", "News"),
@@ -50,6 +55,7 @@ RSS_FEEDS = [
     ("https://www.themarginalian.org/rss/", "Culture"),
     ("https://aeon.co/feed", "Culture"),
     ("https://pudding.cool/rss.xml", "Culture"),
+    ("https://www.huffingtonpost.co.uk/","Culture"),
 
     # Science
     ("https://www.nature.com/nature.rss", "Science"),

@@ -17,6 +17,7 @@ import math
 import hashlib
 import html
 import re
+import requests
 # CHANGED: fix import name and use Counter for trending keywords
 from collections import Counter  # CHANGED: was `counter` originally
 
@@ -74,6 +75,11 @@ ARCHIVE_DIR = "archive"
 LOG_PATH = "digest.log"
 HALF_LIFE_HOURS = 8.0
 
+# Weather
+OXFORD_LAT = 51.7520
+OXFORD_LON = -1.2577
+WEATHER_API_ENDPOINT = "https://api.open-meteo.com/v1/forecast"
+
 # lightweight priority and keyword boosts (kept, simplified)
 SOURCE_PRIORITY = {
 #    "bbc": 1.05,
@@ -95,6 +101,7 @@ KEYWORD_BOOSTS = {
 }
 
 # ---------------- utilities ----------------
+
 def safe_write(path, text):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
@@ -160,6 +167,67 @@ def format_pub_local(pub_dt):
         local = pub_dt.astimezone()
     return local.strftime("%Y-%m-%d %H:%M %Z")
 
+# ---------------- simple weather helper ----------------
+# Uses Open-Meteo free API: current_weather + daily high/low for next 3 days.
+# See: https://open-meteo.com/en/docs for API details. :contentReference[oaicite:1]{index=1}
+WEATHERCODE_MAP = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
+    55: "Dense drizzle", 61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 80: "Rain showers",
+    81: "Moderate showers", 82: "Violent showers", 95: "Thunderstorm",
+}
+
+def fetch_oxford_weather(session=None, days=3):
+    """
+    Returns a small HTML snippet with current weather and a short daily summary for Oxford.
+    If network calls fail, returns an empty string.
+    """
+    s = session or requests
+    params = {
+        "latitude": OXFORD_LAT,
+        "longitude": OXFORD_LON,
+        "current_weather": "true",
+        "daily": "temperature_2m_max,temperature_2m_min,weathercode",
+        "timezone": "Europe/London",
+        "forecast_days": str(days)
+    }
+    try:
+        resp = s.get(WEATHER_API_ENDPOINT, params=params, timeout=6)
+        resp.raise_for_status()
+        data = resp.json()
+        cw = data.get("current_weather", {})
+        daily = data.get("daily", {})
+        # current
+        cur_temp = cw.get("temperature")
+        cur_wind = cw.get("windspeed")
+        cur_code = cw.get("weathercode")
+        cur_desc = WEATHERCODE_MAP.get(cur_code, str(cur_code) if cur_code is not None else "N/A")
+        # build small daily rows (date, min/max, short desc)
+        rows = []
+        dates = daily.get("time", [])[:days]
+        tmax = daily.get("temperature_2m_max", [])[:days]
+        tmin = daily.get("temperature_2m_min", [])[:days]
+        wcodes = daily.get("weathercode", [])[:days]
+        for d, hi, lo, wc in zip(dates, tmax, tmin, wcodes):
+            desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
+            rows.append(f"<div class='wf-day'><strong>{html.escape(d)}</strong>: {html.escape(desc)} — {round(lo)}° / {round(hi)}°</div>")
+        daily_html = "\n".join(rows)
+        html_snippet = (
+            "<div class='weather-forecast'>"
+            "<h2 class='wf-title'>Oxford weather</h2>"
+            f"<div class='wf-now'>Now: {html.escape(str(round(cur_temp)) + '°C' if cur_temp is not None else 'N/A')} — {html.escape(cur_desc)}"
+            f" (wind {html.escape(str(round(cur_wind)) + ' km/h' if cur_wind is not None else 'N/A')})</div>"
+            f"<div class='wf-daily'>{daily_html}</div>"
+            "</div>"
+        )
+        return html_snippet
+    except Exception:
+        # fail silently — digest should still be generated
+        return ""
+
+
+
 # ---------------- scoring ----------------
 def source_score(source):
     if not source:
@@ -219,6 +287,19 @@ def build_html_digest(items_by_section, err_message=None):
     if "Politics" in keys:
         order.append("Politics")
     order += others
+
+    header_block = f"""
+    <header class="digest-header">
+      <h1>Daily News</h1>
+      <div class="muted time">{html.escape(updated_label)}</div>
+    </header>
+    """
+
+    # add call to fetch weather (non-fatal)
+    try:
+        weather_html = fetch_oxford_weather()
+    except Exception:
+        weather_html = ""
 
     section_blocks = []
     for sec in order:
@@ -298,6 +379,8 @@ def build_html_digest(items_by_section, err_message=None):
     </header>
 <main>
     {error_block}
+
+    {weather_html}
 
     {sections_block}
 

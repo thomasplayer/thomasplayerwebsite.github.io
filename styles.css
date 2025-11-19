@@ -162,3 +162,9 @@ p { margin: 0.5rem 0 1rem 0; }
   .news-item { padding-bottom: .5rem; }
   .news-title { font-size: 0.98rem; }
 }
+
+/* ---------- Tweaks for weather ---------- */
+.weather-forecast { border: 1px solid #ddd; padding: 8px 12px; margin: 12px 0; border-radius: 6px; background:#fbfbfb; }
+.wf-title { margin:0 0 6px 0; font-size:1.05rem; }
+.wf-now { font-weight:600; margin-bottom:6px; }
+.wf-day { font-size:0.95rem; margin:2px 0; }

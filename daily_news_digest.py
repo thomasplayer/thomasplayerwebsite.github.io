@@ -187,7 +187,7 @@ def format_temp(value):
     s = f"{val}".replace("-", "–")
     return f"{s}°C"
 
-def fetch_oxford_weather(days=3):
+def fetch_oxford_weather(days=4):
     """
     Returns an HTML snippet with current weather and short forecast for Oxford.
     Uses Open-Meteo (no API key).  Fails silently if network unavailable.
@@ -216,10 +216,10 @@ def fetch_oxford_weather(days=3):
 
         # build short daily rows
         rows = []
-        dates = daily.get("time", [])[:days]
-        tmax = daily.get("temperature_2m_max", [])[:days]
-        tmin = daily.get("temperature_2m_min", [])[:days]
-        wcodes = daily.get("weathercode", [])[:days]
+        dates = daily.get("time", [])[1:days]
+        tmax = daily.get("temperature_2m_max", [])[1:days]
+        tmin = daily.get("temperature_2m_min", [])[1:days]
+        wcodes = daily.get("weathercode", [])[1:days]
         for d, hi, lo, wc in zip(dates, tmax, tmin, wcodes):
             try:
                 weekday = datetime.strptime(d, "%Y-%m-%d").strftime("%a")

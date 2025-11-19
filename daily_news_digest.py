@@ -178,6 +178,15 @@ WEATHERCODE_MAP = {
     81: "Moderate showers", 82: "Violent showers", 95: "Thunderstorm",
 }
 
+def format_temp(value):
+    """Return a temperature string with °C, using en dash for negatives."""
+    if value is None:
+        return "N/A"
+    val = round(value)
+    # replace leading minus with en dash (U+2013)
+    s = f"{val}".replace("-", "–")
+    return f"{s}°C"
+
 def fetch_oxford_weather(days=3):
     """
     Returns an HTML snippet with current weather and short forecast for Oxford.
@@ -212,15 +221,24 @@ def fetch_oxford_weather(days=3):
         tmin = daily.get("temperature_2m_min", [])[:days]
         wcodes = daily.get("weathercode", [])[:days]
         for d, hi, lo, wc in zip(dates, tmax, tmin, wcodes):
+            try:
+                weekday = datetime.strptime(d, "%Y-%m-%d").strftime("%a")
+            except Exception:
+                weekday = d
             desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
-            rows.append(f"<div class='wf-day'><strong>{html.escape(d)}</strong>: {html.escape(desc)}, {round(lo)}° / {round(hi)}°</div>")
-
+            rows.append(
+                f"<div class='wf-day'><strong>{html.escape(weekday)}</strong>: "
+                f"{html.escape(desc)} — {html.escape(format_temp(lo))} / {html.escape(format_temp(hi))}</div>"
+            )
+            
         daily_html = "\n".join(rows)
         html_snippet = (
             "<div class='weather-forecast'>"
-            "<h2 class='wf-title'>Weather</h2>"
-            f"<div class='wf-now'>Today: {html.escape(str(round(cur_temp)) + '°C' if cur_temp is not None else 'N/A')}, {html.escape(cur_desc)}"
-            f" (wind {html.escape(str(round(cur_wind_mph)) + ' mph' if cur_wind_mph is not None else 'N/A')})</div>"
+            "<h2 class='wf-title'>Oxford weather</h2>"
+            f"<div class='wf-now'>Now: "
+            f"{html.escape(format_temp(cur_temp))}, "
+            f"{html.escape(cur_desc)} (wind "
+            f"{html.escape(str(round(cur_wind_mph)) + ' mph' if cur_wind_mph is not None else 'N/A')})</div>"
             f"<div class='wf-daily'>{daily_html}</div>"
             "</div>"
         )

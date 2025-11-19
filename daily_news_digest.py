@@ -228,16 +228,16 @@ def fetch_oxford_weather(days=3):
             desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
             rows.append(
                 f"<div class='wf-day'><strong>{html.escape(weekday)}</strong>: "
-                f"{html.escape(desc)} — {html.escape(format_temp(lo))} / {html.escape(format_temp(hi))}</div>"
+                f"{html.escape(desc)}, {html.escape(format_temp(lo))}/{html.escape(format_temp(hi))}</div>"
             )
             
         daily_html = "\n".join(rows)
         html_snippet = (
             "<div class='weather-forecast'>"
             "<h2 class='wf-title'>Oxford weather</h2>"
-            f"<div class='wf-now'>Now: "
-            f"{html.escape(format_temp(cur_temp))}, "
-            f"{html.escape(cur_desc)} (wind "
+            f"<div class='wf-now'><strong>Now</strong>: "
+            f"{html.escape(cur_desc)}, "
+            f"{html.escape(format_temp(cur_temp))} ("
             f"{html.escape(str(round(cur_wind_mph)) + ' mph' if cur_wind_mph is not None else 'N/A')})</div>"
             f"<div class='wf-daily'>{daily_html}</div>"
             "</div>"

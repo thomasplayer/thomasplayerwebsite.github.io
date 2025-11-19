@@ -17,7 +17,7 @@ import math
 import hashlib
 import html
 import re
-import requests
+import urllib.request, json
 # CHANGED: fix import name and use Counter for trending keywords
 from collections import Counter  # CHANGED: was `counter` originally
 
@@ -178,32 +178,33 @@ WEATHERCODE_MAP = {
     81: "Moderate showers", 82: "Violent showers", 95: "Thunderstorm",
 }
 
-def fetch_oxford_weather(session=None, days=3):
+def fetch_oxford_weather(days=3):
     """
-    Returns a small HTML snippet with current weather and a short daily summary for Oxford.
-    If network calls fail, returns an empty string.
+    Returns an HTML snippet with current weather and short forecast for Oxford.
+    Uses Open-Meteo (no API key).  Fails silently if network unavailable.
     """
-    s = session or requests
-    params = {
-        "latitude": OXFORD_LAT,
-        "longitude": OXFORD_LON,
-        "current_weather": "true",
-        "daily": "temperature_2m_max,temperature_2m_min,weathercode",
-        "timezone": "Europe/London",
-        "forecast_days": str(days)
-    }
+    params = (
+        f"?latitude={OXFORD_LAT}&longitude={OXFORD_LON}"
+        f"&current_weather=true"
+        f"&daily=temperature_2m_max,temperature_2m_min,weathercode"
+        f"&timezone=Europe/London"
+        f"&forecast_days={days}"
+    )
+    url = WEATHER_API_ENDPOINT + params
     try:
-        resp = s.get(WEATHER_API_ENDPOINT, params=params, timeout=6)
-        resp.raise_for_status()
-        data = resp.json()
+        with urllib.request.urlopen(url, timeout=6) as resp:
+            data = json.load(resp)
+
         cw = data.get("current_weather", {})
         daily = data.get("daily", {})
+
         # current
         cur_temp = cw.get("temperature")
         cur_wind = cw.get("windspeed")
         cur_code = cw.get("weathercode")
         cur_desc = WEATHERCODE_MAP.get(cur_code, str(cur_code) if cur_code is not None else "N/A")
-        # build small daily rows (date, min/max, short desc)
+
+        # build short daily rows
         rows = []
         dates = daily.get("time", [])[:days]
         tmax = daily.get("temperature_2m_max", [])[:days]
@@ -212,6 +213,7 @@ def fetch_oxford_weather(session=None, days=3):
         for d, hi, lo, wc in zip(dates, tmax, tmin, wcodes):
             desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
             rows.append(f"<div class='wf-day'><strong>{html.escape(d)}</strong>: {html.escape(desc)} — {round(lo)}° / {round(hi)}°</div>")
+
         daily_html = "\n".join(rows)
         html_snippet = (
             "<div class='weather-forecast'>"
@@ -223,10 +225,7 @@ def fetch_oxford_weather(session=None, days=3):
         )
         return html_snippet
     except Exception:
-        # fail silently — digest should still be generated
         return ""
-
-
 
 # ---------------- scoring ----------------
 def source_score(source):

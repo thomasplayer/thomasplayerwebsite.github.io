@@ -200,7 +200,8 @@ def fetch_oxford_weather(days=3):
 
         # current
         cur_temp = cw.get("temperature")
-        cur_wind = cw.get("windspeed")
+        cur_wind_kmh = cw.get("windspeed")
+        cur_wind_mph = cur_wind_kmh * 0.621371 if cur_wind_kmh is not None else None
         cur_code = cw.get("weathercode")
         cur_desc = WEATHERCODE_MAP.get(cur_code, str(cur_code) if cur_code is not None else "N/A")
 
@@ -212,14 +213,14 @@ def fetch_oxford_weather(days=3):
         wcodes = daily.get("weathercode", [])[:days]
         for d, hi, lo, wc in zip(dates, tmax, tmin, wcodes):
             desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
-            rows.append(f"<div class='wf-day'><strong>{html.escape(d)}</strong>: {html.escape(desc)} — {round(lo)}° / {round(hi)}°</div>")
+            rows.append(f"<div class='wf-day'><strong>{html.escape(d)}</strong>: {html.escape(desc)}, {round(lo)}° / {round(hi)}°</div>")
 
         daily_html = "\n".join(rows)
         html_snippet = (
             "<div class='weather-forecast'>"
-            "<h2 class='wf-title'>Oxford weather</h2>"
-            f"<div class='wf-now'>Now: {html.escape(str(round(cur_temp)) + '°C' if cur_temp is not None else 'N/A')} — {html.escape(cur_desc)}"
-            f" (wind {html.escape(str(round(cur_wind)) + ' km/h' if cur_wind is not None else 'N/A')})</div>"
+            "<h2 class='wf-title'>Weather</h2>"
+            f"<div class='wf-now'>Today: {html.escape(str(round(cur_temp)) + '°C' if cur_temp is not None else 'N/A')}, {html.escape(cur_desc)}"
+            f" (wind {html.escape(str(round(cur_wind_mph)) + ' mph' if cur_wind_mph is not None else 'N/A')})</div>"
             f"<div class='wf-daily'>{daily_html}</div>"
             "</div>"
         )

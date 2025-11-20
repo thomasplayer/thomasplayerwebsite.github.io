@@ -235,7 +235,7 @@ def fetch_oxford_weather(days=4):
         html_snippet = (
             "<div class='weather-forecast'>"
             "<h2 class='wf-title'>Oxford weather</h2>"
-            f"<div class='wf-now'><strong>Now</strong>: "
+            f"<div class='wf-now'><strong>Today</strong>: "
             f"{html.escape(cur_desc)}, "
             f"{html.escape(format_temp(cur_temp))} ("
             f"{html.escape(str(round(cur_wind_mph)) + ' mph' if cur_wind_mph is not None else 'N/A')})</div>"

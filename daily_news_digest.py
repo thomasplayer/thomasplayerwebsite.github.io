@@ -228,7 +228,7 @@ def fetch_oxford_weather(days=4):
             desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
             rows.append(
                 f"<div class='wf-day'><strong>{html.escape(weekday)}</strong>: "
-                f"{html.escape(desc)}, {html.escape(format_temp(lo))}/{html.escape(format_temp(hi))}</div>"
+                f"{html.escape(desc)}, {html.escape(format_temp(lo))} / {html.escape(format_temp(hi))}</div>"
             )
             
         daily_html = "\n".join(rows)

@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Simplified daily_news_digest.py
+Daily News Digest — rewritten, deterministic, single-file.
 
-Keeps original features:
-- fetch RSS feeds (tagged by section)
-- consider items from last 24 hours
-- score items, enforce per-section caps and overall MAX_ITEMS
-- write digest.html, archive/digest-YYYYMMDDHHMMSS.html, and digest.log
-- deterministic, no external AI
-- renders local times in Europe/London
+- Preserves your original CONFIG block exactly.
+- Fetches RSS feeds (last 24 hours), clusters similar items, ranks by
+  deterministic score (recency, cluster size, keyword boosts), enforces
+  per-section caps and MAX_ITEMS, writes digest.html, archive/, digest.log.
+- No external AI; suitable for CI (GitHub Actions).
+- Requires: feedparser (pip install feedparser)
 """
 
 from datetime import datetime, timezone, timedelta
@@ -18,8 +17,7 @@ import hashlib
 import html
 import re
 import urllib.request, json
-# CHANGED: fix import name and use Counter for trending keywords
-from collections import Counter  # CHANGED: was `counter` originally
+from collections import Counter
 
 # Prefer zoneinfo for explicit timezone handling
 try:
@@ -122,19 +120,12 @@ def uid_for(link, title=""):
 def short_summary(snippet, max_chars=500):
     if not snippet:
         return ""
-    # Replace paragraph-like breaks with a period
     s = re.sub(r"</p>|<br\s*/?>|\n+", ".", snippet, flags=re.IGNORECASE)
-    # Remove any other HTML tags
     s = re.sub(r"<[^>]+>", " ", s)
-    # Normalize whitespace
     s = re.sub(r"\s+", " ", s).strip()
-    # Replace accidental multiple periods (except ellipses)
-    # e.g., "Hello.." -> "Hello.", but "Hello..." stays "Hello..."
     s = re.sub(r"(?<!\.)\.\.(?!\.)", ".", s)
-    # If already short enough, return
     if len(s) <= max_chars:
         return s
-    # Try to cut at sentence boundary
     parts = re.split(r'(?<=[.!?])\s+', s)
     out = ""
     for p in parts:
@@ -143,10 +134,8 @@ def short_summary(snippet, max_chars=500):
             out = candidate
         else:
             break
-    # If no sentence fits, truncate cleanly at a word boundary
     if not out:
         out = s[:max_chars].rsplit(" ", 1)[0] + "..."
-    # Final cleanup for double periods again (post-truncation)
     out = re.sub(r"(?<!\.)\.\.(?!\.)", ".", out)
     return out
 
@@ -168,8 +157,6 @@ def format_pub_local(pub_dt):
     return local.strftime("%Y-%m-%d %H:%M %Z")
 
 # ---------------- simple weather helper ----------------
-# Uses Open-Meteo free API: current_weather + daily high/low for next 3 days.
-# See: https://open-meteo.com/en/docs for API details. :contentReference[oaicite:1]{index=1}
 WEATHERCODE_MAP = {
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
     45: "Fog", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
@@ -179,19 +166,13 @@ WEATHERCODE_MAP = {
 }
 
 def format_temp(value):
-    """Return a temperature string with °C, using en dash for negatives."""
     if value is None:
         return "N/A"
     val = round(value)
-    # replace leading minus with en dash (U+2013)
     s = f"{val}".replace("-", "–")
     return f"{s}°C"
 
 def fetch_oxford_weather(days=4):
-    """
-    Returns an HTML snippet with current weather and short forecast for Oxford.
-    Uses Open-Meteo (no API key).  Fails silently if network unavailable.
-    """
     params = (
         f"?latitude={OXFORD_LAT}&longitude={OXFORD_LON}"
         f"&current_weather=true"
@@ -207,14 +188,12 @@ def fetch_oxford_weather(days=4):
         cw = data.get("current_weather", {})
         daily = data.get("daily", {})
 
-        # current
         cur_temp = cw.get("temperature")
         cur_wind_kmh = cw.get("windspeed")
         cur_wind_mph = cur_wind_kmh * 0.621371 if cur_wind_kmh is not None else None
         cur_code = cw.get("weathercode")
         cur_desc = WEATHERCODE_MAP.get(cur_code, str(cur_code) if cur_code is not None else "N/A")
 
-        # build short daily rows
         rows = []
         dates = daily.get("time", [])[1:days]
         tmax = daily.get("temperature_2m_max", [])[1:days]
@@ -230,7 +209,7 @@ def fetch_oxford_weather(days=4):
                 f"<div class='wf-day'><strong>{html.escape(weekday)}</strong>: "
                 f"{html.escape(desc)}, {html.escape(format_temp(lo))} / {html.escape(format_temp(hi))}</div>"
             )
-            
+
         daily_html = "\n".join(rows)
         html_snippet = (
             "<div class='weather-forecast'>"
@@ -277,8 +256,6 @@ def keyword_score(text):
 def title_signal(title):
     if not title:
         return 0.0
-    # if any(ch.isdigit() for ch in title):
-        # return 1.0
     return 0.2 if len(title.split()) <= 8 else 0.0
 
 def score_item(item, now=None, dup_count=1):
@@ -296,7 +273,6 @@ def build_html_digest(items_by_section, err_message=None):
     now_utc = datetime.now(timezone.utc)
     updated_label = format_top_updated(now_utc)
 
-    # order: News, Politics, then alphabetical
     keys = list(items_by_section.keys())
     others = sorted(k for k in keys if k not in ("News", "Politics"))
     order = []
@@ -305,13 +281,6 @@ def build_html_digest(items_by_section, err_message=None):
     if "Politics" in keys:
         order.append("Politics")
     order += others
-
-    header_block = f"""
-    <header class="digest-header">
-      <h1>Daily News</h1>
-      <div class="muted time">{html.escape(updated_label)}</div>
-    </header>
-    """
 
     # add call to fetch weather (non-fatal)
     try:
@@ -350,7 +319,6 @@ def build_html_digest(items_by_section, err_message=None):
 
     sections_block = "\n".join(section_blocks) if section_blocks else "<p>No items found.</p>"
 
-    # archives listing (latest 10) -- formatted link text from filename: HH:MM:SS DD Month YYYY (local Europe/London)
     archives_html = ""
     try:
         if os.path.isdir(ARCHIVE_DIR):
@@ -361,10 +329,8 @@ def build_html_digest(items_by_section, err_message=None):
                 for f in files[:10]:
                     display_time = None
                     try:
-                        # filename pattern: digest-YYYYMMDDHHMMSS.html
                         ts_str = f.removeprefix("digest-").removesuffix(".html")
                         dt = datetime.strptime(ts_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-                        # convert to local timezone for display
                         try:
                             local_dt = dt.astimezone(LOCAL_TZ)
                         except Exception:
@@ -418,25 +384,25 @@ def build_html_digest(items_by_section, err_message=None):
 STOPWORDS = {  # ADDED: stopwords for deterministic tokenizer
     "the","a","an","and","or","of","in","on","for","to","with","by","from","is","are","was",
     "it","its","that","this","at","as","be","has","have","will","new","update"
-}  # ADDED
+}
 
-def tokenize(text):  # ADDED
+def tokenize(text):
     if not text:
         return set()
     t = text.lower()
     t = re.sub(r"[^0-9a-z'\s]", " ", t)
     toks = [w.strip("'") for w in t.split()]
     toks = [w for w in toks if w and w not in STOPWORDS and len(w) > 1]
-    return set(toks)  # ADDED
+    return set(toks)
 
-def jaccard(a, b):  # ADDED
+def jaccard(a, b):
     if not a or not b:
         return 0.0
     inter = len(a & b)
     union = len(a | b)
     return inter / union if union else 0.0
 
-def cluster_items(items, jaccard_threshold=0.35):  # ADDED
+def cluster_items(items, jaccard_threshold=0.35):
     sorted_idx = sorted(range(len(items)),
                         key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc)),
                         reverse=True)
@@ -457,7 +423,7 @@ def cluster_items(items, jaccard_threshold=0.35):  # ADDED
             cluster_token_sets.append(toks)
     return clusters, cluster_token_sets
 
-def extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=20):  # ADDED
+def extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=20):
     cluster_info = []
     for idx, cl in enumerate(clusters):
         top_pubs = sorted([items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc) for i in cl], reverse=True)
@@ -471,7 +437,7 @@ def extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_c
     candidates = [t for t,c in freq.most_common() if len(t) > 2]
     return candidates[:top_k]
 
-def keyword_match_score(item, trending_keywords, explicit_boosts):  # ADDED
+def keyword_match_score(item, trending_keywords, explicit_boosts):
     t = (item.get("title","") + " " + item.get("summary","")).lower()
     s = 0.0
     for i, kw in enumerate(trending_keywords):
@@ -483,7 +449,7 @@ def keyword_match_score(item, trending_keywords, explicit_boosts):  # ADDED
             s += boost
     return s
 
-def compute_final_scores(items):  # ADDED
+def compute_final_scores(items):
     clusters, cluster_token_sets = cluster_items(items, jaccard_threshold=0.35)
     cluster_meta = []
     for ci, cl in enumerate(clusters):
@@ -513,7 +479,7 @@ def compute_final_scores(items):  # ADDED
         it["cluster_size"] = cluster_size
     return clusters, cluster_meta, trending
 
-def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):  # ADDED
+def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):
     for it in items:
         if "uid" not in it:
             it["uid"] = uid_for(it.get("link",""), it.get("title",""))
@@ -568,7 +534,6 @@ def run():
         safe_write(LOG_PATH, "\n".join(log_lines) + "\n")
         return 1
 
-    # collect items from feeds
     for url, section in RSS_FEEDS:
         try:
             doc = feedparser.parse(url)
@@ -577,12 +542,10 @@ def run():
                 link = (e.get("link") or "").strip()
                 title = (e.get("title") or "").strip()
                 summary = (e.get("summary") or e.get("description") or "").strip()
-                # Use feedparser's parsed time when present, else try ISO8601 if available
                 tp = e.get("published_parsed") or e.get("updated_parsed")
                 pub_dt = None
                 if tp:
                     try:
-                        # feedparser gives struct_time-like
                         import calendar
                         pub_dt = datetime.fromtimestamp(calendar.timegm(tp), tz=timezone.utc)
                     except Exception:
@@ -614,7 +577,6 @@ def run():
     if not items:
         log_lines.append("info: no items within 24 hours")
 
-    # dedupe by uid, keep newest instance and count duplicates (unchanged)
     grouped = {}
     for it in items:
         u = it["uid"]
@@ -623,16 +585,12 @@ def run():
         else:
             existing = grouped[u]["item"]
             grouped[u]["count"] += 1
-            # keep the later published one
             if it.get("published") and existing.get("published") and it["published"] > existing["published"]:
                 grouped[u]["item"] = it
 
-    # CHANGED: replaced original scoring/sorting block with clustering-based selection (call select_items)
-    # ADDED: build candidates list for selection
-    candidates = [info["item"] for uid, info in grouped.items()]  # ADDED
-    selected = select_items(candidates, max_items=MAX_ITEMS)  # ADDED: use new deterministic selection pipeline
+    candidates = [info["item"] for uid, info in grouped.items()]
+    selected = select_items(candidates, max_items=MAX_ITEMS)
 
-    # ADDED: assemble items_by_section from selected items (respecting caps already enforced)
     items_by_section = {}
     total_selected = 0
     for it in selected:
@@ -644,16 +602,14 @@ def run():
     html_page = build_html_digest(items_by_section)
     ok = safe_write(OUT_PATH, html_page)
     log_lines.append(f"wrote:{OUT_PATH} ok={ok}")
-    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(candidates)}")  # CHANGED: log updated to reflect new flow
+    log_lines.append(f"selected_items:{total_selected} total_candidates:{len(candidates)}")
 
-    # archive
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
     archive_path = os.path.join(ARCHIVE_DIR, f"digest-{ts}.html")
     ok2 = safe_write(archive_path, html_page)
     log_lines.append(f"archive:{archive_path} ok={ok2}")
 
-    # write log
     safe_write(LOG_PATH, "\n".join(log_lines) + "\n")
     return 0
 

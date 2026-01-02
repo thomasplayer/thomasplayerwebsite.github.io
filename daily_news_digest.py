@@ -449,59 +449,100 @@ def keyword_match_score(item, trending_keywords, explicit_boosts):
             s += boost
     return s
 
-def compute_final_scores(items):
-    clusters, cluster_token_sets = cluster_items(items, jaccard_threshold=0.35)
+def compute_final_scores(items, jaccard_threshold=0.25):
+    """
+    Compute clusters and final_score for each item.
+    Adds `cluster_size` and `cluster_index` fields to items in-place,
+    and returns (clusters, cluster_meta, trending).
+    """
+    clusters, cluster_token_sets = cluster_items(items, jaccard_threshold=jaccard_threshold)
     cluster_meta = []
     for ci, cl in enumerate(clusters):
         size = len(cl)
-        rep_idx = sorted(cl, key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc), items[i]["uid"]), reverse=True)[0]
+        rep_idx = sorted(
+            cl,
+            key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc), items[i]["uid"]),
+            reverse=True
+        )[0]
         cluster_meta.append({"index": ci, "size": size, "rep_idx": rep_idx})
+
     trending = extract_trending_keywords(clusters, cluster_token_sets, items, top_cluster_count=8, top_k=25)
 
+    # count duplicates by uid (not cluster)
     uid_to_dup = {}
     for ci, cl in enumerate(clusters):
         for i in cl:
             uid = items[i]["uid"]
             uid_to_dup[uid] = uid_to_dup.get(uid, 0) + 1
 
-    for i, it in enumerate(items):
-        dup_count = uid_to_dup.get(it["uid"], 1)
-        cluster_index = next((m["index"] for m in cluster_meta if i in clusters[m["index"]]), None)
-        cluster_size = 0 if cluster_index is None else cluster_meta[cluster_index]["size"]
-        cluster_factor = 1.0 + math.log1p(cluster_size) if cluster_size > 1 else 1.0
-        base = (1.0 * source_score(it.get("source"))
-                + 1.6 * recency_score(it.get("published"))
-                + 0.6 * title_signal(it.get("title",""))
-                + 0.25 * min(1.0, len(it.get("summary","")) / 500.0)
-                + 0.9 * math.log1p(dup_count))
-        kw_score = keyword_match_score(it, trending, KEYWORD_BOOSTS)
-        it["final_score"] = base * cluster_factor + 2.0 * kw_score
-        it["cluster_size"] = cluster_size
+    # assign cluster_index and compute scores
+    for ci, cl in enumerate(clusters):
+        for i in cl:
+            it = items[i]
+            dup_count = uid_to_dup.get(it["uid"], 1)
+            cluster_size = len(cl)
+            cluster_factor = 1.0 + math.log1p(cluster_size) if cluster_size > 1 else 1.0
+
+            base = (1.0 * source_score(it.get("source"))
+                    + 1.6 * recency_score(it.get("published"))
+                    + 0.6 * title_signal(it.get("title",""))
+                    + 0.25 * min(1.0, len(it.get("summary","")) / 500.0)
+                    + 0.9 * math.log1p(dup_count))
+
+            kw_score = keyword_match_score(it, trending, KEYWORD_BOOSTS)
+            it["final_score"] = base * cluster_factor + 2.0 * kw_score
+            it["cluster_size"] = cluster_size
+            it["cluster_index"] = ci
+
     return clusters, cluster_meta, trending
 
+
 def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):
+    # Ensure minimal fields + defaults
     for it in items:
-        if "uid" not in it:
-            it["uid"] = uid_for(it.get("link",""), it.get("title",""))
-        if "published" not in it or it["published"] is None:
-            it["published"] = datetime.min.replace(tzinfo=timezone.utc)
+        it.setdefault("uid", uid_for(it.get("link",""), it.get("title","")))
+        it.setdefault("published", datetime.min.replace(tzinfo=timezone.utc))
+        it.setdefault("section", it.get("section") or "Misc")
 
-    clusters, cluster_meta, trending = compute_final_scores(items)
+    # Lower threshold slightly to group more aggressively if you still see duplicates:
+    # clusters, cluster_meta, trending = compute_final_scores(items, jaccard_threshold=0.25)
+    clusters, cluster_meta, trending = compute_final_scores(items, jaccard_threshold=0.35)
 
-    headline_clusters = [m for m in cluster_meta if m["size"] > 1]
-    headline_clusters.sort(key=lambda m: (-m["size"], -items[m["rep_idx"]]["final_score"], -int((items[m["rep_idx"]].get("published") or datetime.min).timestamp()), items[m["rep_idx"]]["uid"]))
+    # Build representative per cluster
+    cluster_meta_sorted = []
+    for ci, cl in enumerate(clusters):
+        rep_idx = sorted(
+            cl,
+            key=lambda i: (items[i].get("published") or datetime.min.replace(tzinfo=timezone.utc),
+                           items[i]["uid"]),
+            reverse=True
+        )[0]
+        cluster_meta_sorted.append({"index": ci, "size": len(cl), "rep_idx": rep_idx})
+
+    # Headline clusters: prefer clusters with many items
+    headline_clusters = [m for m in cluster_meta_sorted if m["size"] > 1]
+    headline_clusters.sort(key=lambda m: (-m["size"], -items[m["rep_idx"]]["final_score"],
+                                         -int((items[m["rep_idx"]].get("published") or datetime.min).timestamp()),
+                                         items[m["rep_idx"]]["uid"]))
     headline_slots = min(headline_slots_preferred, len(headline_clusters))
 
     selected = []
     selected_uids = set()
+    represented_cluster_indices = set()
 
+    # Reserve headline slots for cluster representatives (one-per-cluster)
     for m in headline_clusters[:headline_slots]:
         rep = items[m["rep_idx"]]
         selected.append(rep)
         selected_uids.add(rep["uid"])
+        represented_cluster_indices.add(m["index"])
 
-    remaining = sorted([it for it in items if it["uid"] not in selected_uids],
-                       key=lambda it: (-it.get("final_score", 0.0), -int((it.get("published") or datetime.min).timestamp()), it.get("source",""), it["uid"]))
+    # Remaining candidates excluding those from represented clusters
+    remaining = [it for it in items if it["uid"] not in selected_uids and it.get("cluster_index") not in represented_cluster_indices]
+    remaining.sort(key=lambda it: (-it.get("final_score", 0.0),
+                                   -int((it.get("published") or datetime.min).timestamp()),
+                                   it.get("source",""),
+                                   it["uid"]))
 
     caps = SECTION_CAPS.copy()
     def get_cap(section):
@@ -512,10 +553,13 @@ def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):
         if sum(1 for s in selected if s.get("section","") == sec) >= get_cap(sec):
             continue
         selected.append(it)
+        selected_uids.add(it["uid"])
+        represented_cluster_indices.add(it.get("cluster_index"))
         if len(selected) >= max_items:
             break
 
     return selected
+
 
 # ---------------- main ----------------
 def run():

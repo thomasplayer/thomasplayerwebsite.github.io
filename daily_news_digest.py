@@ -22,7 +22,6 @@ FEEDS = [
 
 _LIVE_TITLE_RE = re.compile(
     r"""
-    (?ix)                       # ignore case, allow comments
     (?:                         # ending phrases
         live
         |latest\s+updates?
@@ -32,7 +31,8 @@ _LIVE_TITLE_RE = re.compile(
         |live\s+coverage
     )
     \s*$                        # must be at end of title
-    """
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
 )
 
 def is_live_title(title: str) -> bool:

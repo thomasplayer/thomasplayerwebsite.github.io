@@ -20,15 +20,41 @@ FEEDS = [
     "https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss",
 ]
 
+_LIVE_TITLE_RE = re.compile(
+    r"""
+    (?ix)                       # ignore case, allow comments
+    (?:                         # ending phrases
+        live
+        |latest\s+updates?
+        |live\s+updates?
+        |breaking\s+live
+        |live\s+blog
+        |live\s+coverage
+    )
+    \s*$                        # must be at end of title
+    """
+)
+
+def is_live_title(title: str) -> bool:
+    if not title:
+        return False
+    t = title.strip()
+    # Remove trailing separators like " - ", " | ", " – "
+    t = re.sub(r"[\s\-\|\u2013\u2014]+$", "", t)
+    return bool(_LIVE_TITLE_RE.search(t))
+
 def gather_all_items(feed_urls):
     items = []
     for url in feed_urls:
         doc = feedparser.parse(url)
         feed_title = doc.feed.get("title") or url
         for entry in doc.entries:
+            "title" = (entry.get("title") or "No title").strip()
+            if is_live_title(title):
+                continue
             items.append({
                 "feed": feed_title,
-                "title": (entry.get("title") or "No title").strip(),
+                "title",
                 "link": (entry.get("link") or "").strip(),
                 "published": entry.get("published") or entry.get("updated") or "",
                 "summary": (entry.get("summary") or entry.get("description") or "").strip(),

@@ -496,7 +496,6 @@ def compute_final_scores(items, jaccard_threshold=0.25):
 
     return clusters, cluster_meta, trending
 
-
 def select_items(items, max_items=MAX_ITEMS, headline_slots_preferred=8):
     # Ensure minimal fields + defaults
     for it in items:

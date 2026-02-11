@@ -5,15 +5,20 @@ import html
 import feedparser
 import re
 from email.utils import parsedate_to_datetime
+import urllib.request, json
+
+
+OUT_FILE = "digest.html"
+ARCHIVE_DIR = "archive"
+
+
+
+# FEEDS
 
 FEEDS = [
     "https://www.theguardian.com/rss",
     "https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss",
 ]
-
-OUT_FILE = "digest.html"
-
-ARCHIVE_DIR = "archive"
 
 def gather_all_items(feed_urls):
     items = []
@@ -104,6 +109,92 @@ def truncate_keep_sentence(text: str, max_words: int = 100, max_overrun_words: i
     # fallback: hard cut at max_words and append ellipsis
     return (head_text.rstrip() + "...")
 
+
+
+
+
+# WEATHER
+
+# Weather: add these near your other top-level constants/imports
+OXFORD_LAT = 51.7520
+OXFORD_LON = -1.2577
+WEATHER_API_ENDPOINT = "https://api.open-meteo.com/v1/forecast"
+
+# weather helpers (copy exactly)
+WEATHERCODE_MAP = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
+    55: "Dense drizzle", 61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+    71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 80: "Rain showers",
+    81: "Moderate showers", 82: "Violent showers", 95: "Thunderstorm",
+}
+
+def format_temp(value):
+    if value is None:
+        return "N/A"
+    val = round(value)
+    s = f"{val}".replace("-", "–")
+    return f"{s}°C"
+
+def fetch_oxford_weather(days=4):
+    params = (
+        f"?latitude={OXFORD_LAT}&longitude={OXFORD_LON}"
+        f"&current_weather=true"
+        f"&daily=temperature_2m_max,temperature_2m_min,weathercode"
+        f"&timezone=Europe/London"
+        f"&forecast_days={days}"
+    )
+    url = WEATHER_API_ENDPOINT + params
+    try:
+        with urllib.request.urlopen(url, timeout=6) as resp:
+            data = json.load(resp)
+
+        cw = data.get("current_weather", {})
+        daily = data.get("daily", {})
+
+        cur_temp = cw.get("temperature")
+        cur_wind_kmh = cw.get("windspeed")
+        cur_wind_mph = cur_wind_kmh * 0.621371 if cur_wind_kmh is not None else None
+        cur_code = cw.get("weathercode")
+        cur_desc = WEATHERCODE_MAP.get(cur_code, str(cur_code) if cur_code is not None else "N/A")
+
+        rows = []
+        dates = daily.get("time", [])[1:days]
+        tmax = daily.get("temperature_2m_max", [])[1:days]
+        tmin = daily.get("temperature_2m_min", [])[1:days]
+        wcodes = daily.get("weathercode", [])[1:days]
+        for d, hi, lo, wc in zip(dates, tmax, tmin, wcodes):
+            try:
+                weekday = datetime.strptime(d, "%Y-%m-%d").strftime("%a")
+            except Exception:
+                weekday = d
+            desc = WEATHERCODE_MAP.get(wc, str(wc) if wc is not None else "")
+            rows.append(
+                f"<div class='wf-day'><strong>{html.escape(weekday)}</strong>: "
+                f"{html.escape(desc)}, {html.escape(format_temp(lo))} / {html.escape(format_temp(hi))}</div>"
+            )
+
+        daily_html = "\n".join(rows)
+        html_snippet = (
+            "<div class='weather-forecast'>"
+            "<h2 class='wf-title'>Oxford weather</h2>"
+            f"<div class='wf-now'><strong>Today</strong>: "
+            f"{html.escape(cur_desc)}, "
+            f"{html.escape(format_temp(cur_temp))} ("
+            f"{html.escape(str(round(cur_wind_mph)) + ' mph' if cur_wind_mph is not None else 'N/A')})</div>"
+            f"<div class='wf-daily'>{daily_html}</div>"
+            "</div>"
+        )
+        return html_snippet
+    except Exception:
+        return ""
+
+
+
+
+
+
+
 def build_html(items, err_message=None):
     """
     Build a simple HTML page that lists all items from all feeds in one long list.
@@ -111,6 +202,11 @@ def build_html(items, err_message=None):
     Requires: `import html, os` and `from datetime import datetime` at module level.
     """
     updated_label = f"Updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+
+    try:
+        weather_html = fetch_oxford_weather()
+    except Exception:
+        weather_html = ""
 
     # Build the flat list of article blocks (preserve input order)
     blocks = []
@@ -164,6 +260,8 @@ def build_html(items, err_message=None):
   </header>
 
   <main>
+    {weather_html}
+
     {error_block}
 
     {sections_block}

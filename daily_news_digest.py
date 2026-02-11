@@ -4,6 +4,7 @@ from datetime import datetime
 import html
 import feedparser
 import re
+from email.utils import parsedate_to_datetime
 
 FEEDS = [
     "https://www.theguardian.com/rss",
@@ -181,6 +182,11 @@ def build_html(items, err_message=None):
 
 def run():
     items = gather_all_items(FEEDS)
+    # Sort all items globally, newest first
+    items.sort(
+        key=lambda it: parsedate_to_datetime(it["published"]) if it.get("published") else datetime.min,
+        reverse=True
+    )
     html_text = build_html(items)
     with open(OUT_FILE, "w", encoding="utf-8") as f:
         f.write(html_text)

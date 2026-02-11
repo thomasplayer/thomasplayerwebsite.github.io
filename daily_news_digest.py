@@ -120,6 +120,7 @@ def build_html(items, err_message=None):
         pub = html.escape(str(it.get("published") or ""))
         raw_summ = it.get("summary") or ""
         plain = strip_tags(raw_summ)
+        plain = remove_continue_reading(plain)
         plain_trunc = truncate_keep_sentence(plain, max_words=100, max_overrun_words=40)
         summ_esc = html.escape(plain_trunc) if plain_trunc else ""
         blocks.append(

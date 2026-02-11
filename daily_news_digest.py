@@ -17,7 +17,25 @@ ARCHIVE_DIR = "archive"
 
 FEEDS = [
     "https://www.theguardian.com/rss",
-    "https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss",
+    "https://feeds.bbci.co.uk/news/uk/rss.xml",
+    "https://www.aljazeera.com/xml/rss/all.xml",
+    "https://www.france24.com/en/rss",
+    "https://lwlies.com/feed",
+    "https://rogerebert.com/feed",
+    "https://www.blog.filmjabber.com/rss/rss-reviews.php",
+    "https://www.blog.filmjabber.com/rss/rss-updates.php",
+    "https://theparisreview.org/blog/feed",
+    "https://feeds.feedburner.com/mcsweeneys",
+    "https://worldliteraturetoday.org/feed",
+    "https://www.bookbrowse.com/rss/",
+    "https://the-tls.co.uk/feed",
+    "https://alittleblogofbooks.com/feed",
+    "https://terribleminds.com/ramble/feed",
+    "https://www.DailyWritingTips.com/feed/",
+    "https://feeds.feedburner.com/GoinsWriter",
+    "https://megdowell.com/feed",
+    "https://novaramedia.com/feed/",
+    "https://oxonbirding.blogspot.com/feeds/posts/default?alt=rss"
 ]
 
 _LIVE_TITLE_RE = re.compile(

@@ -41,6 +41,68 @@ def strip_tags(html_text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return html.unescape(text)
 
+def remove_continue_reading(text: str) -> str:
+    """
+    Remove 'Continue reading...' (case-insensitive),
+    including trailing dots or whitespace.
+    """
+    if not text:
+        return ""
+    # Remove variations like:
+    # Continue reading...
+    # Continue reading
+    # Continue reading…
+    cleaned = re.sub(
+        r'Continue reading\s*\.{0,3}',
+        '',
+        text,
+        flags=re.IGNORECASE
+    )
+    return cleaned.strip()
+
+def truncate_keep_sentence(text: str, max_words: int = 100, max_overrun_words: int = 40) -> str:
+    """
+    Truncate `text` aiming for at most `max_words` words.
+    If the truncation point falls mid-sentence, extend forward to the next sentence end
+    ('.', '!', '?') so the summary ends at a sentence boundary — but only up to
+    `max_overrun_words` extra words. If no sentence end is found in that window,
+    cut at the last full word within max_words and append '...'.
+
+    Returns trimmed text (no extra escaping).
+    """
+    if not text:
+        return ""
+    # collapse whitespace
+    s = re.sub(r"\s+", " ", text).strip()
+    words = s.split()
+    if len(words) <= max_words:
+        return s
+
+    # candidate by hard word cut
+    head_words = words[:max_words]
+    head_text = " ".join(head_words)
+
+    # If head_text already ends with a sentence terminator, use it.
+    if re.search(r"[\.!?][\"']?\s*$", head_text):
+        return head_text
+
+    # Otherwise look ahead up to max_overrun_words for a sentence end
+    lookahead_end = min(len(words), max_words + max_overrun_words)
+    tail_words = words[max_words:lookahead_end]
+    # rebuild the remainder text and search for sentence end punctuation
+    remainder = " " + " ".join(tail_words) if tail_words else ""
+    # find the first sentence terminator in the remainder (prefer earlier)
+    m = re.search(r"([\.!?][\"']?)(?=\s|$)", remainder)
+    if m:
+        # include up to the match end
+        end_index = m.end()
+        # remainder starts with a leading space, so slice accordingly
+        extended = head_text + remainder[:end_index]
+        return extended.strip()
+
+    # fallback: hard cut at max_words and append ellipsis
+    return (head_text.rstrip() + "...")
+
 def build_html(items, err_message=None):
     """
     Build a simple HTML page that lists all items from all feeds in one long list.
@@ -58,7 +120,8 @@ def build_html(items, err_message=None):
         pub = html.escape(str(it.get("published") or ""))
         raw_summ = it.get("summary") or ""
         plain = strip_tags(raw_summ)
-        summ_esc = html.escape(plain) if plain else ""
+        plain_trunc = truncate_keep_sentence(plain, max_words=100, max_overrun_words=40)
+        summ_esc = html.escape(plain_trunc) if plain_trunc else ""
         blocks.append(
             "<article class='news-item'>"
             f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{title}</a></h3>"

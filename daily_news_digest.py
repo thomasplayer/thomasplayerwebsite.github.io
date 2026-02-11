@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from datetime import datetime
+from datetime import datetime, timezone
 import html
 import feedparser
 import re
@@ -52,6 +52,30 @@ _LIVE_TITLE_RE = re.compile(
     """,
     flags=re.IGNORECASE | re.VERBOSE,
 )
+
+def parse_date_safe(s):
+    """
+    Return a timezone-aware datetime (UTC) for string s, or
+    datetime.min with tzinfo=UTC if s is missing / invalid.
+    """
+    if not s:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        dt = parsedate_to_datetime(s)
+        # parsedate_to_datetime sometimes returns naive datetimes — make them UTC-aware
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        # fallback: try ISO parse (handles "YYYY-MM-DDTHH:MM:SSZ")
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+
 
 def is_live_title(title: str) -> bool:
     if not title:
@@ -324,9 +348,9 @@ def build_html(items, err_message=None):
 
 def run():
     items = gather_all_items(FEEDS)
-    # Sort all items globally, newest first
+    # Sort all items globally, newest first (use parse_date_safe so all keys are aware datetimes)
     items.sort(
-        key=lambda it: parsedate_to_datetime(it["published"]) if it.get("published") else datetime.min,
+        key=lambda it: parse_date_safe(it.get("published")),
         reverse=True
     )
     html_text = build_html(items)

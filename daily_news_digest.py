@@ -3,6 +3,7 @@
 from datetime import datetime
 import html
 import feedparser
+import re
 
 FEEDS = [
     "https://www.theguardian.com/rss",
@@ -28,6 +29,18 @@ def gather_all_items(feed_urls):
             })
     return items
 
+def strip_tags(html_text: str) -> str:
+    """Remove tags and script/style blocks, then unescape HTML entities."""
+    if not html_text:
+        return ""
+    # Remove script/style blocks
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html_text)
+    # Remove remaining tags
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    # Collapse whitespace and unescape entities
+    text = re.sub(r"\s+", " ", text).strip()
+    return html.unescape(text)
+
 def build_html(items, err_message=None):
     """
     Build a simple HTML page that lists all items from all feeds in one long list.
@@ -43,8 +56,9 @@ def build_html(items, err_message=None):
         link = html.escape((it.get("link") or "").strip())
         feed = html.escape((it.get("feed") or "").strip())
         pub = html.escape(str(it.get("published") or ""))
-        summ = (it.get("summary") or "").strip()
-        summ_esc = html.escape(summ) if summ else ""
+        raw_summ = it.get("summary") or ""
+        plain = strip_tags(raw_summ)
+        summ_esc = html.escape(plain) if plain else ""
         blocks.append(
             "<article class='news-item'>"
             f"<h3 class='news-title'><a href='{link}' target='_blank' rel='noopener'>{title}</a></h3>"

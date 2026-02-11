@@ -49,12 +49,12 @@ def gather_all_items(feed_urls):
         doc = feedparser.parse(url)
         feed_title = doc.feed.get("title") or url
         for entry in doc.entries:
-            "title" = (entry.get("title") or "No title").strip()
+            title = (entry.get("title") or "No title").strip()
             if is_live_title(title):
                 continue
             items.append({
                 "feed": feed_title,
-                "title",
+                "title": title,
                 "link": (entry.get("link") or "").strip(),
                 "published": entry.get("published") or entry.get("updated") or "",
                 "summary": (entry.get("summary") or entry.get("description") or "").strip(),
